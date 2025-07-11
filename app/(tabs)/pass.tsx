@@ -8,7 +8,7 @@ import { useSubscriptionStore } from '@/store/subscriptionStore';
 import DigitalPass from '@/components/DigitalPass';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
-import colors from '@/constants/colors';
+import colors from '../../constants/colors';
 
 export default function PassScreen() {
   const router = useRouter();

@@ -2,7 +2,7 @@ import React from 'react';
 import { Tabs } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { MapPin, QrCode, User, Bus } from 'lucide-react-native';
-import colors from '@/constants/colors';
+import colors from '../../constants/colors';
 
 export default function TabLayout() {
   return (

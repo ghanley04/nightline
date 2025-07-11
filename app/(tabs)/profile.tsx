@@ -7,7 +7,7 @@ import { User, Mail, Phone, School, Bell, CreditCard, LogOut, Camera, MapPin } f
 import { useAuthStore } from '@/store/authStore';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
-import colors from '@/constants/colors';
+import colors from '../../constants/colors';
 
 export default function ProfileScreen() {
   const router = useRouter();
