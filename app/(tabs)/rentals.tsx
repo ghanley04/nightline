@@ -6,7 +6,7 @@ import { Calendar, Clock, MapPin, DollarSign, PlusCircle } from 'lucide-react-na
 import { useAuthStore } from '@/store/authStore';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
-import colors from '@/constants/colors';
+import colors from '../../constants/colors';
 
 // Mock rental data
 const mockRentals = [

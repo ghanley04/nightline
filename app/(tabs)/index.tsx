@@ -8,7 +8,7 @@ import { useBusStore } from '@/store/busStore';
 import { mockBuses, mockBusStops } from '@/mocks/busData';
 import { BusStop } from '@/types';
 import BusStopCard from '@/components/BusStopCard';
-import colors from '@/constants/colors';
+import colors from '../../constants/colors';
 
 export default function MapScreen() {
   const router = useRouter();
