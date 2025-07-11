@@ -1,75 +1,169 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import React, { useEffect } from 'react';
+import { View, Text, StyleSheet, Image, TouchableOpacity } from 'react-native';
+import { useRouter } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Bus } from 'lucide-react-native';
+import { useAuthStore } from '@/store/authStore';
+import Button from '@/components/Button';
+import colors from '@/constants/colors';
 
-import { HelloWave } from '@/components/HelloWave';
-import ParallaxScrollView from '@/components/ParallaxScrollView';
-import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
+import { Amplify } from 'aws-amplify';
+// Make sure the path to aws-exports.js is correct for your project structure
+import config from './aws-exports'; 
+Amplify.configure(config);
 
-export default function HomeScreen() {
+export default function WelcomeScreen() {
+  const router = useRouter();
+  const { isAuthenticated, isOnboarded } = useAuthStore();
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      if (isOnboarded) {
+        router.replace('/(tabs)');
+      } else {
+        router.replace('/onboarding');
+      }
+    }
+  }, [isAuthenticated, isOnboarded]);
+
+  const handleLogin = () => {
+    router.push('/auth/login');
+  };
+
+  const handleSignUp = () => {
+    router.push('/auth/signup');
+  };
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
+    <View style={styles.container}>
+      <StatusBar style="light" />
+      <LinearGradient
+        colors={[colors.secondary, '#222222']}
+        style={styles.background}
+      />
+      
+      <View style={styles.logoContainer}>
+        <Bus size={60} color={colors.primary} />
+        <Text style={styles.logoText}>Night Line</Text>
+        <Text style={styles.logoSubtext}>COMO</Text>
+      </View>
+      
+      <View style={styles.contentContainer}>
+        <Text style={styles.title}>Your Campus Shuttle Service</Text>
+        <Text style={styles.subtitle}>
+          Safe, reliable transportation for Mizzou students, day and night
+        </Text>
+        
+        <View style={styles.featureList}>
+          <View style={styles.featureItem}>
+            <View style={styles.featureDot} />
+            <Text style={styles.featureText}>Live bus tracking</Text>
+          </View>
+          <View style={styles.featureItem}>
+            <View style={styles.featureDot} />
+            <Text style={styles.featureText}>Digital shuttle pass</Text>
+          </View>
+          <View style={styles.featureItem}>
+            <View style={styles.featureDot} />
+            <Text style={styles.featureText}>Affordable monthly plans</Text>
+          </View>
+        </View>
+      </View>
+      
+      <View style={styles.buttonContainer}>
+        <Button 
+          title="Sign Up" 
+          onPress={handleSignUp} 
+          variant="primary"
+          style={styles.signupButton}
         />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+        <Button 
+          title="Log In" 
+          onPress={handleLogin} 
+          variant="outline"
+          style={styles.loginButton}
+          textStyle={styles.loginButtonText}
+        />
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
+  container: {
+    flex: 1,
+    justifyContent: 'space-between',
+  },
+  background: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+  },
+  logoContainer: {
+    alignItems: 'center',
+    marginTop: 80,
+  },
+  logoText: {
+    fontSize: 36,
+    fontWeight: 'bold',
+    color: colors.background,
+    marginTop: 16,
+  },
+  logoSubtext: {
+    fontSize: 18,
+    color: colors.primary,
+    fontWeight: '600',
+    letterSpacing: 4,
+  },
+  contentContainer: {
+    padding: 24,
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: colors.background,
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  subtitle: {
+    fontSize: 16,
+    color: '#CCCCCC',
+    textAlign: 'center',
+    marginBottom: 32,
+  },
+  featureList: {
+    marginTop: 20,
+  },
+  featureItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    marginBottom: 16,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  featureDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.primary,
+    marginRight: 12,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  featureText: {
+    fontSize: 16,
+    color: colors.background,
+  },
+  buttonContainer: {
+    padding: 24,
+    paddingBottom: 40,
+  },
+  signupButton: {
+    marginBottom: 16,
+  },
+  loginButton: {
+    borderColor: colors.background,
+  },
+  loginButtonText: {
+    color: colors.background,
   },
 });
