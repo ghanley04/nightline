@@ -1,26 +1,19 @@
-/**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
- */
-
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
-
-export const Colors = {
-  light: {
-    text: '#11181C',
-    background: '#fff',
-    tint: tintColorLight,
-    icon: '#687076',
-    tabIconDefault: '#687076',
-    tabIconSelected: tintColorLight,
-  },
-  dark: {
-    text: '#ECEDEE',
-    background: '#151718',
-    tint: tintColorDark,
-    icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
-    tabIconSelected: tintColorDark,
-  },
+// Mizzou-inspired color palette
+export const colors = {
+  primary: '#F1B82D', // Mizzou Gold
+  secondary: '#000000', // Black
+  background: '#FFFFFF', // White
+  text: '#333333',
+  textLight: '#777777',
+  success: '#4CAF50',
+  error: '#F44336',
+  warning: '#FF9800',
+  info: '#2196F3',
+  card: '#F9F9F9',
+  border: '#EEEEEE',
+  placeholder: '#BBBBBB',
+  overlay: 'rgba(0, 0, 0, 0.5)',
+  shadow: 'rgba(0, 0, 0, 0.1)',
 };
+
+export default colors;
