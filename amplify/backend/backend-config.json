@@ -9,6 +9,14 @@
           ],
           "category": "function",
           "resourceName": "itemsHandler"
+        },
+        {
+          "attributes": [
+            "Name",
+            "Arn"
+          ],
+          "category": "function",
+          "resourceName": "profileHandler"
         }
       ],
       "providerPlugin": "awscloudformation",
@@ -46,6 +54,25 @@
       "build": true,
       "providerPlugin": "awscloudformation",
       "service": "Lambda"
+    },
+    "profileHandler": {
+      "build": true,
+      "dependsOn": [
+        {
+          "attributeEnvMap": {
+            "Arn": "TABLE_ARN",
+            "Name": "TABLE_NAME"
+          },
+          "attributes": [
+            "Name",
+            "Arn"
+          ],
+          "category": "storage",
+          "resourceName": "profile"
+        }
+      ],
+      "providerPlugin": "awscloudformation",
+      "service": "Lambda"
     }
   },
   "parameters": {
@@ -64,9 +91,29 @@
           "resourceName": "itemsHandler"
         }
       ]
+    },
+    "AMPLIFY_function_profileHandler_deploymentBucketName": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "profileHandler"
+        }
+      ]
+    },
+    "AMPLIFY_function_profileHandler_s3Key": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "profileHandler"
+        }
+      ]
     }
   },
   "storage": {
+    "profile": {
+      "providerPlugin": "awscloudformation",
+      "service": "DynamoDB"
+    },
     "profiles": {
       "providerPlugin": "awscloudformation",
       "service": "DynamoDB"

@@ -13,6 +13,17 @@
           "delete"
         ]
       }
+    },
+    "/profile": {
+      "name": "/profile",
+      "lambdaFunction": "profileHandler",
+      "permissions": {
+        "setting": "private",
+        "auth": [
+          "read",
+          "update"
+        ]
+      }
     }
   }
 }
