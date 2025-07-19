@@ -7,48 +7,25 @@ const apiName = 'apiREST'; // Replace with your actual API name
 export async function addUser(profileData: any) {
   try {
     const restOperation = post({ // Let TypeScript infer the type
-        apiName: 'apiRest',
-        path: '/profile',
-        options: {
-          body: profileData
-        }
-      });
+      apiName: 'apiREST',
+      path: '/profile',
+      options: {
+        body: profileData
+      }
+    });
 
     const { body } = await restOperation.response;
-    const response = await body.json();
+    const responseData = await body.json(); // Parse the JSON response body
 
-    // Check if the backend response itself indicates an error,
-    // assuming your backend sends a non-2xx status but still a JSON body
-    // that might indicate an error (e.g., success: false, or an errorMessage field).
-    // This is optional and depends on your backend's error structure for 2xx responses.
-    if (response && response.success === false) {
-      throw new Error(response.message || 'Backend reported a non-successful operation.');
-    }
+    console.log('Amplify API POST successful:', responseData);
+    return responseData; // Return the parsed response data
 
-    console.log('Amplify POST call succeeded:', response);
-    return response; // Return the response from your backend on success
-  } catch (e) {
-    console.error('Amplify POST call failed (raw error):', e);
-    
-    let errorMessage = 'An unexpected error occurred.';
+  } catch (error) {
+    // Log the full error to understand what went wrong
+    console.error('Amplify API POST failed for addUser:', error);
 
-    // Attempt to parse the error from Amplify's structured error object
-    if (e && e.response && e.response.body) {
-      try {
-        const errorBody = JSON.parse(e.response.body);
-        // Assuming your backend sends an error message in 'message' or 'error' field
-        errorMessage = errorBody.message || errorBody.error || errorMessage;
-        console.error('Backend error details:', errorBody);
-      } catch (parseError) {
-        // If parsing fails, it might be a non-JSON error or a network issue
-        errorMessage = 'Failed to connect to the server or parse its response.';
-        console.error('Error parsing backend response body:', parseError);
-      }
-    } else if (e.message) {
-      // Catch other JavaScript errors or network issues
-      errorMessage = e.message;
-    }
-    // Re-throw a new Error with a clearer message for the calling function
-    throw new Error(errorMessage);
+    // Re-throw the error so it can be caught by the calling function (e.g., handleSignUp)
+    // and display a user-friendly message.
+    throw new Error(`Failed to add user: ${error instanceof Error ? error.message : String(error)}`);
   }
 }

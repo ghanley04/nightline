@@ -1,77 +1,75 @@
-import React from 'react';
-import { Tabs } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import { MapPin, QrCode, User, Bus } from 'lucide-react-native';
-import colors from '@/constants/colors';
-
-
+import FontAwesome from "@expo/vector-icons/FontAwesome";
+import { useFonts } from "expo-font";
+import { Stack } from "expo-router";
+import * as SplashScreen from "expo-splash-screen";
+import { useEffect } from "react";
+import { StatusBar } from "expo-status-bar";
+import { useAuthStore } from "@/store/authStore";
 import { Amplify } from 'aws-amplify';
-// Make sure the path to aws-exports.js is correct for your project structure
-import config from './aws-exports'; 
+import config from '../aws-exports'; 
+
 Amplify.configure(config);
 
- 
-export default function TabLayout() {
+
+export const unstable_settings = {
+  initialRouteName: "index",
+};
+
+// Prevent the splash screen from auto-hiding before asset loading is complete.
+SplashScreen.preventAutoHideAsync();
+
+export default function RootLayout() {
+  const [loaded, error] = useFonts({
+    ...FontAwesome.font,
+  });
+  
+  const { isAuthenticated, isOnboarded } = useAuthStore();
+
+  useEffect(() => {
+    if (error) {
+      console.error(error);
+      throw error;
+    }
+  }, [error]);
+
+  useEffect(() => {
+    if (loaded) {
+      SplashScreen.hideAsync();
+    }
+  }, [loaded]);
+
+  if (!loaded) {
+    return null;
+  }
+
+  return <RootLayoutNav />;
+}
+
+function RootLayoutNav() {
+  const { isAuthenticated, isOnboarded } = useAuthStore();
+
   return (
     <>
       <StatusBar style="dark" />
-      <Tabs
-        screenOptions={{
-          tabBarActiveTintColor: colors.primary,
-          tabBarInactiveTintColor: colors.textLight,
-          tabBarStyle: {
-            borderTopColor: colors.border,
-          },
-          tabBarLabelStyle: {
-            fontSize: 12,
-            fontWeight: '500',
-          },
-          headerStyle: {
-            backgroundColor: colors.background,
-          },
-          headerTitleStyle: {
-            fontWeight: 'bold',
-            color: colors.text,
-          },
-        }}
-      >
-        <Tabs.Screen
-          name="index"
-          options={{
-            title: 'Map',
-            tabBarIcon: ({ color, size }) => (
-              <MapPin size={size} color={color} />
-            ),
-          }}
-        />
-        <Tabs.Screen
-          name="pass"
-          options={{
-            title: 'My Pass',
-            tabBarIcon: ({ color, size }) => (
-              <QrCode size={size} color={color} />
-            ),
-          }}
-        />
-        <Tabs.Screen
-          name="rentals"
-          options={{
-            title: 'Rentals',
-            tabBarIcon: ({ color, size }) => (
-              <Bus size={size} color={color} />
-            ),
-          }}
-        />
-        <Tabs.Screen
-          name="profile"
-          options={{
-            title: 'Profile',
-            tabBarIcon: ({ color, size }) => (
-              <User size={size} color={color} />
-            ),
-          }}
-        />
-      </Tabs>
+      <Stack screenOptions={{ headerShown: false }}>
+        {!isAuthenticated ? (
+          <>
+            <Stack.Screen name="index" options={{ headerShown: false }} />
+            <Stack.Screen name="auth/login" options={{ title: "Log In" }} />
+            <Stack.Screen name="auth/signup" options={{ title: "Sign Up" }} />
+          </>
+        ) : !isOnboarded ? (
+          <Stack.Screen name="onboarding/index" options={{ headerShown: false, gestureEnabled: false }} />
+        ) : (
+          <>
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen name="subscription/plans" options={{ presentation: 'modal', title: 'Choose a Plan' }} />
+            <Stack.Screen name="subscription/payment" options={{ presentation: 'modal', title: 'Payment' }} />
+            <Stack.Screen name="guest/create" options={{ presentation: 'modal', title: 'Invite a Guest' }} />
+            <Stack.Screen name="rental/request" options={{ presentation: 'modal', title: 'Request Bus Rental' }} />
+          </>
+        )}
+      </Stack>
     </>
   );
 }
