@@ -1,18 +1,9 @@
-// babel.config.js
+// babel.config.mjs
 module.exports = function(api) {
-    api.cache(true); // You can keep this
-    return {
-      presets: ['babel-preset-expo'],
-      plugins: [
-        [
-          'module-resolver',
-          {
-            // This is the crucial part: maps @/ to your project root
-            alias: {
-              '@': './',
-            },
-          },
-        ],
-      ],
-    };
+  api.cache(true);
+  return {
+    presets: ['babel-preset-expo'],
+    // No need to add '@babel/preset-env' here directly,
+    // as 'babel-preset-expo' handles it.
   };
+};
