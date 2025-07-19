@@ -51,13 +51,18 @@
         "itemsHandler": {
           "deploymentBucketName": "amplify-nightlineapi-project-2e095-deployment",
           "s3Key": "amplify-builds/itemsHandler-685268615a5655494868-build.zip"
+        },
+        "profileHandler": {
+          "deploymentBucketName": "amplify-nightlineapi-project-2e095-deployment",
+          "s3Key": "amplify-builds/profileHandler-52724978533857302b72-build.zip"
         }
       },
       "api": {
         "apiREST": {}
       },
       "storage": {
-        "profiles": {}
+        "profiles": {},
+        "profile": {}
       }
     }
   }

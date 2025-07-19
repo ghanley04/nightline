@@ -4,6 +4,13 @@ import { StatusBar } from 'expo-status-bar';
 import { MapPin, QrCode, User, Bus } from 'lucide-react-native';
 import colors from '@/constants/colors';
 
+
+import { Amplify } from 'aws-amplify';
+// Make sure the path to aws-exports.js is correct for your project structure
+import config from './aws-exports'; 
+Amplify.configure(config);
+
+ 
 export default function TabLayout() {
   return (
     <>

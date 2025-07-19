@@ -9,6 +9,8 @@ import Input from '@/components/Input';
 import Button from '@/components/Button';
 import colors from '@/constants/colors';
 
+import { addUser } from '../api';
+
 export default function SignupScreen() {
   const router = useRouter();
   const { setUser, setToken, setIsAuthenticated, setIsOnboarded } = useAuthStore();
@@ -80,27 +82,38 @@ export default function SignupScreen() {
 
     setIsLoading(true);
 
-    // Simulate API call
-    setTimeout(() => {
-      // Mock successful signup
-      const newUser = {
-        ...mockUser,
+    try {
+      // 1. Prepare the data to send to your backend
+      const userDataToSend = {
         name,
         email,
-        phone,
-        subscriptionActive: false,
-        subscriptionType: undefined,
-        subscriptionEndDate: undefined,
+        phone: phone.replace(/\D/g, ''), // Send only digits to the backend
+        password,
+        // You can add other fields here if your profile expects them,
+        // e.g., 'userRole': 'customer' or 'status': 'pending'
       };
+
+      // 2. Call your addUser function (which uses Amplify's post)
+      const backendResponse = await addUser(userDataToSend);
+
+      // 3. Handle successful response from the backend
+      // Assuming your backend returns user data and a token upon successful signup
+      Alert.alert('Success', 'Account created successfully!');
       
-      setUser(newUser);
-      setToken('mock-token-12345');
+      // Update your auth store with data from the backend response
+      setUser(backendResponse.user); // Assuming backendResponse.user contains the user object
+      setToken(backendResponse.token); // Assuming backendResponse.token contains the auth token
       setIsAuthenticated(true);
-      setIsOnboarded(false);
+      setIsOnboarded(false); // Adjust based on your onboarding flow/backend response
       router.replace('/onboarding');
-      
+
+    } catch (error) {
+      // 4. Handle errors from the backend or network issues
+      console.error('Signup process failed:', error);
+      Alert.alert('Signup Error', error.message || 'An unexpected error occurred during signup. Please try again.');
+    } finally {
       setIsLoading(false);
-    }, 1500);
+    }
   };
 
   const handleLogin = () => {
