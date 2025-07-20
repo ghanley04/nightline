@@ -89,6 +89,7 @@ export default function SignupScreen() {
         email,
         phone: phone.replace(/\D/g, ''), // Send only digits to the backend
         password,
+        isSubscribed: false,
         // You can add other fields here if your profile expects them,
         // e.g., 'userRole': 'customer' or 'status': 'pending'
       };
