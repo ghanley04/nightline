@@ -11,22 +11,10 @@ import {
 addUser // Correct import from './api'
 } from './api';
 
-interface Profile {
-  id: string;
-  username: string;
-  email: string;
-  // Add other properties as they exist in your DynamoDB table
-  isSubscribed?: boolean;
-  phone?: string;
-}
-
 export default function WelcomeScreen() {
   const router = useRouter();
-  const { isAuthenticated, isOnboarded } = useAuthStore();
 
-  
-
-  const handleLogin = () => {
+    const handleLogin = () => {
     router.push('/auth/login');
   };
 
@@ -37,6 +25,7 @@ export default function WelcomeScreen() {
 
 
   return (
+    
     <View style={styles.container}>
       <StatusBar style="light" />
       <LinearGradient

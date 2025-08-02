@@ -45,7 +45,8 @@
     },
     "categories": {
       "auth": {
-        "nightlineapi": {}
+        "nightlineapi": {},
+        "userPoolGroups": {}
       },
       "function": {
         "itemsHandler": {

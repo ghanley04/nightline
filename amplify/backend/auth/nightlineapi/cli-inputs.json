@@ -58,7 +58,9 @@
     "adminQueries": false,
     "triggers": {},
     "hostedUI": false,
-    "userPoolGroupList": [],
+    "userPoolGroupList": [
+      "profileUsers"
+    ],
     "authProviders": [],
     "parentStack": {
       "Ref": "AWS::StackId"
