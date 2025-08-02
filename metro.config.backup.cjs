@@ -15,3 +15,12 @@ const config = getDefaultConfig(__dirname);
 config.resolver.unstable_enablePackageExports = true;
 
 module.exports = config;
+
+// import { getDefaultConfig } from '@expo/metro-config';
+
+// const config = getDefaultConfig(__dirname);
+
+// // Enable package exports for better module resolution with modern libraries
+// config.resolver.unstable_enablePackageExports = true;
+
+// export default config;
