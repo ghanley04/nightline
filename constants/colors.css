@@ -1,0 +1,16 @@
+:root {
+  --color-primary: #F1B82D;       /* Mizzou Gold */
+  --color-secondary: #000000;     /* Black */
+  --color-background: #FFFFFF;    /* White */
+  --color-text: #333333;
+  --color-text-light: #777777;
+  --color-success: #4CAF50;
+  --color-error: #F44336;
+  --color-warning: #FF9800;
+  --color-info: #2196F3;
+  --color-card: #F9F9F9;
+  --color-border: #EEEEEE;
+  --color-placeholder: #BBBBBB;
+  --color-overlay: rgba(0, 0, 0, 0.5);
+  --color-shadow: rgba(0, 0, 0, 0.1);
+}

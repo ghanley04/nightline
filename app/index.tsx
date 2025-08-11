@@ -1,82 +1,75 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity } from 'react-native';
-import { useRouter } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Bus } from 'lucide-react-native';
 import { useAuthStore } from '@/store/authStore';
 import Button from '@/components/Button';
 import colors from '@/constants/colors';
-import {
-addUser // Correct import from './api'
-} from './api';
+import { useAuth } from "react-oidc-context";
+import { Suspense } from 'react';
+
+
+
 
 export default function WelcomeScreen() {
   const router = useRouter();
-
-    const handleLogin = () => {
-    router.push('/auth/login');
-  };
-
-  const handleSignUp = () => {
-    router.push('/auth/signup');
-  };
-
-
+  const auth = useAuth();
 
   return (
-    
-    <View style={styles.container}>
-      <StatusBar style="light" />
-      <LinearGradient
-        colors={[colors.secondary, '#222222']}
-        style={styles.background}
-      />
-
-      <View style={styles.logoContainer}>
-        <Bus size={60} color={colors.primary} />
-        <Text style={styles.logoText}>Night Line</Text>
-        <Text style={styles.logoSubtext}>COMO</Text>
+    <Suspense fallback={
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <Text>Loading authentication...</Text>
       </View>
+    }>
+      
+      <View style={styles.container}>
+        <StatusBar style="light" />
+        <LinearGradient
+          colors={[colors.secondary, '#222222']}
+          style={styles.background}
+        />
 
-      <View style={styles.contentContainer}>
-        <Text style={styles.title}>Your Campus Shuttle Service</Text>
-        <Text style={styles.subtitle}>
-          Safe, reliable transportation for Mizzou students, day and night
-        </Text>
+        <View style={styles.logoContainer}>
+          <Bus size={60} color={colors.primary} />
+          <Text style={styles.logoText}>Night Line</Text>
+          <Text style={styles.logoSubtext}>COMO</Text>
+        </View>
 
-        <View style={styles.featureList}>
-          <View style={styles.featureItem}>
-            <View style={styles.featureDot} />
-            <Text style={styles.featureText}>Live bus tracking</Text>
-          </View>
-          <View style={styles.featureItem}>
-            <View style={styles.featureDot} />
-            <Text style={styles.featureText}>Digital shuttle pass</Text>
-          </View>
-          <View style={styles.featureItem}>
-            <View style={styles.featureDot} />
-            <Text style={styles.featureText}>Affordable monthly plans</Text>
+        <View style={styles.contentContainer}>
+          <Text style={styles.title}>Your Campus Shuttle Service</Text>
+          <Text style={styles.subtitle}>
+            Safe, reliable transportation for Mizzou students, day and night
+          </Text>
+
+          <View style={styles.featureList}>
+            <View style={styles.featureItem}>
+              <View style={styles.featureDot} />
+              <Text style={styles.featureText}>Live bus tracking</Text>
+            </View>
+            <View style={styles.featureItem}>
+              <View style={styles.featureDot} />
+              <Text style={styles.featureText}>Digital shuttle pass</Text>
+            </View>
+            <View style={styles.featureItem}>
+              <View style={styles.featureDot} />
+              <Text style={styles.featureText}>Affordable monthly plans</Text>
+            </View>
           </View>
         </View>
-      </View>
 
-      <View style={styles.buttonContainer}>
-        <Button
-          title="Sign Up"
-          onPress={handleSignUp}
-          variant="primary"
-          style={styles.signupButton}
-        />
-        <Button
-          title="Log In"
-          onPress={handleLogin}
-          variant="outline"
-          style={styles.loginButton}
-          textStyle={styles.loginButtonText}
-        />
+        <View style={styles.buttonContainer}>
+          <Button
+            title="Log In"
+            onPress={() => auth.signinRedirect()}
+            variant="primary"
+            style={styles.loginButton}
+            textStyle={styles.loginButtonText}
+          />
+        </View>
       </View>
-    </View>
+    </Suspense>
   );
 }
 

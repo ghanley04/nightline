@@ -9,7 +9,7 @@ import Input from '@/components/Input';
 import Button from '@/components/Button';
 import colors from '@/constants/colors';
 
-import { addUser } from '../api';
+// import { addUser } from '../../api';
 
 export default function SignupScreen() {
   const router = useRouter();
