@@ -86,7 +86,7 @@ export default function MapScreen() {
             ]}
           >
             <View style={styles.busMarkerDot} />
-            <Text style={styles.busMarkerText}>{bus.name}</Text>
+            <Text style={styles.busMarkerText}>bus name</Text>
           </View>
         ))}
         
