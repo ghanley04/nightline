@@ -8,11 +8,16 @@ import { useAuthStore } from '@/store/authStore';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
 import colors from '../../constants/colors';
+import { useAuth } from 'react-oidc-context';
 
 export default function ProfileScreen() {
   const router = useRouter();
   const { user, setUser, logout } = useAuthStore();
-  
+  const auth = useAuth();
+
+  console.log("Full user object:", auth.user);
+
+
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [locationEnabled, setLocationEnabled] = useState(true);
 
@@ -21,7 +26,7 @@ export default function ProfileScreen() {
     const lastUpdate = new Date(user?.updatedAt || '');
     const threeMonthsAgo = new Date();
     threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
-    
+
     if (lastUpdate > threeMonthsAgo) {
       Alert.alert(
         'Photo Update Restricted',
@@ -32,7 +37,7 @@ export default function ProfileScreen() {
     }
 
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    
+
     if (status !== 'granted') {
       Alert.alert('Permission Required', 'Please allow access to your photo library to update your profile picture.');
       return;
@@ -52,7 +57,7 @@ export default function ProfileScreen() {
         photoUrl: result.assets[0].uri,
         updatedAt: new Date().toISOString(),
       });
-      
+
       Alert.alert('Photo Updated', 'Your profile photo has been updated successfully.');
     }
   };
@@ -63,8 +68,8 @@ export default function ProfileScreen() {
       'Are you sure you want to log out?',
       [
         { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Logout', 
+        {
+          text: 'Logout',
           onPress: () => {
             logout();
             router.replace('/');
@@ -75,10 +80,11 @@ export default function ProfileScreen() {
     );
   };
 
+
   return (
     <View style={styles.container}>
       <StatusBar style="dark" />
-      
+
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.profileHeader}>
           <View style={styles.photoContainer}>
@@ -91,26 +97,26 @@ export default function ProfileScreen() {
                 </Text>
               </View>
             )}
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.cameraButton}
               onPress={handleUpdatePhoto}
             >
               <Camera size={16} color={colors.background} />
             </TouchableOpacity>
           </View>
-          
-          <Text style={styles.name}>{user?.name}</Text>
+
+          <Text style={styles.name}>{auth.user?.profile.email}</Text>
           <Text style={styles.userType}>
-            {user?.userType === 'individual' ? 'Individual Student' : 
-             user?.userType === 'greek' ? 'Greek Life Member' : 'Guest'}
+            {user?.userType === 'individual' ? 'Individual Student' :
+              user?.userType === 'greek' ? 'Greek Life Member' : 'Guest'}
           </Text>
-          
+
           {user?.subscriptionActive ? (
             <View style={styles.subscriptionBadge}>
               <Text style={styles.subscriptionText}>Active Subscription</Text>
             </View>
           ) : (
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.subscribeButton}
               onPress={() => router.push('/subscription/plans')}
             >
@@ -118,10 +124,10 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           )}
         </View>
-        
+
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Personal Information</Text>
-          
+
           <Card style={styles.infoCard}>
             <View style={styles.infoItem}>
               <View style={styles.infoIcon}>
@@ -129,36 +135,36 @@ export default function ProfileScreen() {
               </View>
               <View style={styles.infoContent}>
                 <Text style={styles.infoLabel}>Full Name</Text>
-                <Text style={styles.infoValue}>{user?.name}</Text>
+                <Text style={styles.infoValue}>{auth.user?.profile.email}</Text>
               </View>
             </View>
-            
+
             <View style={styles.divider} />
-            
+
             <View style={styles.infoItem}>
               <View style={styles.infoIcon}>
                 <Mail size={18} color={colors.primary} />
               </View>
               <View style={styles.infoContent}>
                 <Text style={styles.infoLabel}>Email</Text>
-                <Text style={styles.infoValue}>{user?.email}</Text>
+                <Text style={styles.infoValue}>{auth.user?.profile.email}</Text>
               </View>
             </View>
-            
+
             <View style={styles.divider} />
-            
+
             <View style={styles.infoItem}>
               <View style={styles.infoIcon}>
                 <Phone size={18} color={colors.primary} />
               </View>
               <View style={styles.infoContent}>
                 <Text style={styles.infoLabel}>Phone</Text>
-                <Text style={styles.infoValue}>{user?.phone}</Text>
+                <Text style={styles.infoValue}>{auth.user?.profile.phone_number}</Text>
               </View>
             </View>
-            
-            <View style={styles.divider} />
-            
+
+            {/* <View style={styles.divider} />
+
             <View style={styles.infoItem}>
               <View style={styles.infoIcon}>
                 <School size={18} color={colors.primary} />
@@ -167,17 +173,17 @@ export default function ProfileScreen() {
                 <Text style={styles.infoLabel}>School</Text>
                 <Text style={styles.infoValue}>{user?.schoolAffiliation}</Text>
               </View>
-            </View>
+            </View> */}
           </Card>
-          
+
           <TouchableOpacity style={styles.editButton}>
             <Text style={styles.editButtonText}>Edit Information</Text>
           </TouchableOpacity>
         </View>
-        
+
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>App Settings</Text>
-          
+
           <Card style={styles.settingsCard}>
             <View style={styles.settingItem}>
               <View style={styles.settingInfo}>
@@ -191,9 +197,9 @@ export default function ProfileScreen() {
                 thumbColor={notificationsEnabled ? colors.primary : '#f4f3f4'}
               />
             </View>
-            
+
             <View style={styles.divider} />
-            
+
             <View style={styles.settingItem}>
               <View style={styles.settingInfo}>
                 <MapPin size={18} color={colors.primary} />
@@ -208,10 +214,10 @@ export default function ProfileScreen() {
             </View>
           </Card>
         </View>
-        
+
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Payment Methods</Text>
-          
+
           <Card style={styles.paymentCard}>
             <View style={styles.paymentMethod}>
               <CreditCard size={24} color={colors.primary} />
@@ -224,12 +230,12 @@ export default function ProfileScreen() {
               </TouchableOpacity>
             </View>
           </Card>
-          
+
           <TouchableOpacity style={styles.addPaymentButton}>
             <Text style={styles.addPaymentText}>+ Add Payment Method</Text>
           </TouchableOpacity>
         </View>
-        
+
         <Button
           title="Log Out"
           onPress={handleLogout}

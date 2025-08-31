@@ -1,0 +1,12 @@
+diff --git a/node_modules/@react-navigation/core/lib/module/PreventRemoveProvider.js b/node_modules/@react-navigation/core/lib/module/PreventRemoveProvider.js
+index 8b7f058..1ed24a6 100644
+--- a/node_modules/@react-navigation/core/lib/module/PreventRemoveProvider.js
++++ b/node_modules/@react-navigation/core/lib/module/PreventRemoveProvider.js
+@@ -1,6 +1,6 @@
+ "use strict";
+ 
+-import { nanoid } from 'nanoid/non-secure';
++import { nanoid } from 'nanoid';
+ import * as React from 'react';
+ import useLatestCallback from 'use-latest-callback';
+ import { NavigationHelpersContext } from "./NavigationHelpersContext.js";

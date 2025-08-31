@@ -23,7 +23,6 @@ export default function WelcomeScreen() {
         <Text>Loading authentication...</Text>
       </View>
     }>
-      
       <View style={styles.container}>
         <StatusBar style="light" />
         <LinearGradient
