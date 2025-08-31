@@ -5,26 +5,12 @@ import * as SplashScreen from "expo-splash-screen";
 import { useEffect, useState } from "react";
 import React, { Suspense } from "react";
 import { StatusBar } from "expo-status-bar";
-import { useAuthStore } from "@/store/authStore";
-import { Amplify } from 'aws-amplify';
-import config from '../aws-exports';
-import { View, Text, Button } from 'react-native';
 import WelcomeScreen from "./index";
-// import { AuthProvider, useAuth } from "react-oidc-context";
-import { AuthProvider, useAuth } from "../assets/AuthContext"; // the AuthProvider we built
+import { Authenticator, useAuthenticator } from '@aws-amplify/ui-react-native';
+import { Amplify } from 'aws-amplify';
+import config from '../src/aws-exports';
 
-
-// export const unstable_settings = {
-//   initialRouteName: "index",
-// };
-
-const cognitoAuthConfig = {
-  authority: "https://cognito-idp.us-east-2.amazonaws.com/us-east-2_w1D8ll1eh",
-  client_id: "40rq35lsi8d0piforq4mqoip9v",
-  redirect_uri: "http://localhost:8081",
-  response_type: "code",
-  scope: "phone openid email",
-};
+Amplify.configure(config);
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -73,11 +59,15 @@ export default function RootLayout() {
     return null; // keep splash visible
   }
 
+
+
+
   return (
-    <AuthProvider {...cognitoAuthConfig}>
-      <LayoutContent /> {/*  //wrap in suspense? */}
-    </AuthProvider>
-  );
+    <Authenticator.Provider>
+      <Authenticator>
+        <LayoutContent />
+      </Authenticator>
+    </Authenticator.Provider>);
 }
 // export default function RootLayout() {
 //   const [loaded, error] = useFonts({
@@ -141,17 +131,23 @@ export default function RootLayout() {
 // }
 
 function LayoutContent() {
- const router = useRouter();
-  const { user } = useAuth();
+  const router = useRouter();
+  // const { user } = useAuth();
+const { authStatus } = useAuthenticator(context => [context.authStatus]);
 
-  useEffect(() => {
-    // When auth state changes, redirect accordingly
-    if (user) {
-      router.replace("/(tabs)"); // user is logged in
-    } else {
-      router.replace("/"); // user not logged in
-    }
-  }, [user]);
+
+  // useEffect(() => {
+  //   // When auth state changes, redirect accordingly
+  //   if (user) {
+  //     router.replace("/(tabs)"); // user is logged in
+  //   } else {
+  //     router.replace("/"); // user not logged in
+  //   }
+  // }, [user]);
+
+  if (authStatus === 'authenticated') {
+    return <Redirect href="/(tabs)" />;
+  }
 
   return (
     <Stack screenOptions={{ headerShown: false }}>
@@ -160,3 +156,4 @@ function LayoutContent() {
     </Stack>
   );
 }
+
