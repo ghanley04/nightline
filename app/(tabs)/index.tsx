@@ -9,7 +9,7 @@ import { mockBuses, mockBusStops } from '@/mocks/busData';
 import { BusStop } from '@/types';
 import BusStopCard from '@/components/BusStopCard';
 import colors from '../../constants/colors';
-import MyMapComponent from '@/map/MyMapComponent.native';
+// import MyMapComponent from '@/map/MyMapComponent.native';
 
 
 export default function MapScreen() {
@@ -69,7 +69,7 @@ export default function MapScreen() {
 
       <View style={styles.mapContainer}>
         {/* This would be a real map in production */}
-        <MyMapComponent/>
+        {/* <MyMapComponent/> */}
 
         {/* Refresh button
         <TouchableOpacity 

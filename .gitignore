@@ -4,6 +4,8 @@
 expo-env.d.ts
 # @end expo-cli
 
+app/aws-exports.js
+
 #amplify-do-not-edit-begin
 amplify/\#current-cloud-backend
 amplify/.config/local-*
@@ -25,4 +27,3 @@ amplifytools.xcconfig
 .secret-*
 **.sample
 #amplify-do-not-edit-end
-app/aws-exports.js

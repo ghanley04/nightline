@@ -1,6 +1,6 @@
 {
   "api": {
-    "apiREST": {
+    "apiNightline": {
       "dependsOn": [
         {
           "attributes": [
@@ -8,15 +8,7 @@
             "Arn"
           ],
           "category": "function",
-          "resourceName": "itemsHandler"
-        },
-        {
-          "attributes": [
-            "Name",
-            "Arn"
-          ],
-          "category": "function",
-          "resourceName": "profileHandler"
+          "resourceName": "nightlineLane"
         }
       ],
       "providerPlugin": "awscloudformation",
@@ -24,7 +16,7 @@
     }
   },
   "auth": {
-    "nightlineapi": {
+    "nightline": {
       "dependsOn": [],
       "frontendAuthConfig": {
         "mfaConfiguration": "OFF",
@@ -41,98 +33,37 @@
         "socialProviders": [],
         "usernameAttributes": [],
         "verificationMechanisms": [
-          "PHONE_NUMBER"
+          "EMAIL"
         ]
       },
       "providerPlugin": "awscloudformation",
       "service": "Cognito",
       "serviceType": "managed"
-    },
-    "userPoolGroups": {
-      "dependsOn": [
-        {
-          "attributes": [
-            "UserPoolId",
-            "AppClientIDWeb",
-            "AppClientID",
-            "IdentityPoolId"
-          ],
-          "category": "auth",
-          "resourceName": "nightlineapi"
-        }
-      ],
-      "providerPlugin": "awscloudformation",
-      "service": "Cognito-UserPool-Groups"
     }
   },
   "function": {
-    "itemsHandler": {
+    "nightlineLane": {
       "build": true,
-      "providerPlugin": "awscloudformation",
-      "service": "Lambda"
-    },
-    "profileHandler": {
-      "build": true,
-      "dependsOn": [
-        {
-          "attributeEnvMap": {
-            "Arn": "TABLE_ARN",
-            "Name": "TABLE_NAME"
-          },
-          "attributes": [
-            "Name",
-            "Arn"
-          ],
-          "category": "storage",
-          "resourceName": "profile"
-        }
-      ],
       "providerPlugin": "awscloudformation",
       "service": "Lambda"
     }
   },
   "parameters": {
-    "AMPLIFY_function_itemsHandler_deploymentBucketName": {
+    "AMPLIFY_function_nightlineLane_deploymentBucketName": {
       "usedBy": [
         {
           "category": "function",
-          "resourceName": "itemsHandler"
+          "resourceName": "nightlineLane"
         }
       ]
     },
-    "AMPLIFY_function_itemsHandler_s3Key": {
+    "AMPLIFY_function_nightlineLane_s3Key": {
       "usedBy": [
         {
           "category": "function",
-          "resourceName": "itemsHandler"
+          "resourceName": "nightlineLane"
         }
       ]
-    },
-    "AMPLIFY_function_profileHandler_deploymentBucketName": {
-      "usedBy": [
-        {
-          "category": "function",
-          "resourceName": "profileHandler"
-        }
-      ]
-    },
-    "AMPLIFY_function_profileHandler_s3Key": {
-      "usedBy": [
-        {
-          "category": "function",
-          "resourceName": "profileHandler"
-        }
-      ]
-    }
-  },
-  "storage": {
-    "profile": {
-      "providerPlugin": "awscloudformation",
-      "service": "DynamoDB"
-    },
-    "profiles": {
-      "providerPlugin": "awscloudformation",
-      "service": "DynamoDB"
     }
   }
 }
