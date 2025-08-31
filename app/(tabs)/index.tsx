@@ -9,11 +9,13 @@ import { mockBuses, mockBusStops } from '@/mocks/busData';
 import { BusStop } from '@/types';
 import BusStopCard from '@/components/BusStopCard';
 import colors from '../../constants/colors';
+import MyMapComponent from '@/map/MyMapComponent.native';
+
 
 export default function MapScreen() {
   const router = useRouter();
   const { buses, stops, selectedStop, setBuses, setStops, setSelectedStop } = useBusStore();
-  
+
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredStops, setFilteredStops] = useState(mockBusStops);
@@ -27,7 +29,7 @@ export default function MapScreen() {
   useEffect(() => {
     // Filter stops based on search query
     if (searchQuery) {
-      const filtered = mockBusStops.filter(stop => 
+      const filtered = mockBusStops.filter(stop =>
         stop.name.toLowerCase().includes(searchQuery.toLowerCase())
       );
       setFilteredStops(filtered);
@@ -38,7 +40,7 @@ export default function MapScreen() {
 
   const handleRefresh = () => {
     setIsLoading(true);
-    
+
     // Simulate refreshing data
     setTimeout(() => {
       // Update ETAs with random values
@@ -50,7 +52,7 @@ export default function MapScreen() {
           Math.floor(Math.random() * 15) + 25,
         ],
       }));
-      
+
       setStops(updatedStops);
       setFilteredStops(updatedStops);
       setIsLoading(false);
@@ -64,33 +66,12 @@ export default function MapScreen() {
   return (
     <View style={styles.container}>
       <StatusBar style="dark" />
-      
+
       <View style={styles.mapContainer}>
         {/* This would be a real map in production */}
-        <Image
-          source={{ uri: 'https://images.unsplash.com/photo-1569336415962-a4bd9f69c07a?q=80&w=2069&auto=format&fit=crop' }}
-          style={styles.mapImage}
-          contentFit="cover"
-        />
-        
-        {/* Bus markers would be placed here in production */}
-        {buses.map((bus: { id: React.Key | null | undefined; name: string | number | bigint | boolean | React.ReactElement<unknown, string | React.JSXElementConstructor<any>> | Iterable<React.ReactNode> | React.ReactPortal | Promise<string | number | bigint | boolean | React.ReactPortal | React.ReactElement<unknown, string | React.JSXElementConstructor<any>> | Iterable<React.ReactNode> | null | undefined> | null | undefined; }) => (
-          <View 
-            key={bus.id}
-            style={[
-              styles.busMarker,
-              {
-                top: `${40 + Math.random() * 30}%`,
-                left: `${20 + Math.random() * 60}%`,
-              }
-            ]}
-          >
-            <View style={styles.busMarkerDot} />
-            <Text style={styles.busMarkerText}>bus name</Text>
-          </View>
-        ))}
-        
-        {/* Refresh button */}
+        <MyMapComponent/>
+
+        {/* Refresh button
         <TouchableOpacity 
           style={styles.refreshButton}
           onPress={handleRefresh}
@@ -101,21 +82,21 @@ export default function MapScreen() {
             color={colors.background} 
             style={isLoading ? styles.rotating : undefined} 
           />
-        </TouchableOpacity>
+        </TouchableOpacity> */}
       </View>
-      
+
       <View style={styles.stopsContainer}>
         <View style={styles.stopsHeader}>
           <Text style={styles.stopsTitle}>Nearby Stops</Text>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.searchButton}
-            onPress={() => {}}
+            onPress={() => { }}
           >
             <Search size={20} color={colors.textLight} />
           </TouchableOpacity>
         </View>
-        
-        <ScrollView 
+
+        <ScrollView
           style={styles.stopsList}
           showsVerticalScrollIndicator={false}
         >

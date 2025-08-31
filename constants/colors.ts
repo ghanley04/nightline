@@ -1,6 +1,7 @@
 // Mizzou-inspired color palette
 export const colors = {
-  primary: '#F1B82D', // Mizzou Gold
+  primary: '#FDB719', // Mizzou Gold
+  darker: '#B37E11', //slightly darker Mizzou Gold
   secondary: '#000000', // Black
   background: '#FFFFFF', // White
   text: '#333333',
