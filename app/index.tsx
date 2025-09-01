@@ -15,7 +15,6 @@ import { Suspense } from 'react';
 
 export default function WelcomeScreen() {
   const router = useRouter();
-  const auth = useAuth();
 
   return (
     <Suspense fallback={
@@ -59,13 +58,13 @@ export default function WelcomeScreen() {
         </View>
 
         <View style={styles.buttonContainer}>
-          <Button
+          {/* <Button
             title="Log In"
             onPress={() => auth.signinRedirect()}
             variant="primary"
             style={styles.loginButton}
             textStyle={styles.loginButtonText}
-          />
+          /> */}
         </View>
       </View>
     </Suspense>

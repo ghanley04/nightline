@@ -59,9 +59,6 @@ export default function RootLayout() {
     return null; // keep splash visible
   }
 
-
-
-
   return (
     <Authenticator.Provider>
       <Authenticator>
@@ -69,71 +66,11 @@ export default function RootLayout() {
       </Authenticator>
     </Authenticator.Provider>);
 }
-// export default function RootLayout() {
-//   const [loaded, error] = useFonts({
-//     ...FontAwesome.font,
-//   });
-
-//   const { isAuthenticated, isOnboarded } = useAuthStore();
-
-//   useEffect(() => {
-//     if (error) {
-//       console.error(error);
-//       throw error;
-//     }
-//   }, [error]);
-
-//   useEffect(() => {
-//     if (loaded) {
-//       SplashScreen.hideAsync();
-//     }
-//   }, [loaded]);
-
-//   if (!loaded) {
-//     return null;
-//   }
-
-//   return (
-
-//     <Suspense fallback={
-//       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-//         <Text>Loading...</Text>
-//       </View>
-//     }>
-//       <AuthProvider {...cognitoAuthConfig}>
-//         <LayoutContent />
-//       </AuthProvider>
-//     </Suspense>
-//   );
-
-// }
-
-// function LayoutContent() {
-//   const router = useRouter();
-//   const auth = useAuth();
-
-//   useEffect(() => {
-//     if (!auth.isLoading) {
-//       if (auth.isAuthenticated) {
-//         router.replace("/(tabs)");
-//       } else {
-//         router.replace("/");
-//       }
-//     }
-//   }, [auth.isLoading, auth.isAuthenticated]);
-
-//   return (
-//     <Stack screenOptions={{ headerShown: false }}>
-//       <Stack.Screen name="index" />
-//       <Stack.Screen name="(tabs)" />
-//     </Stack>
-//   );
-// }
 
 function LayoutContent() {
   const router = useRouter();
   // const { user } = useAuth();
-const { authStatus } = useAuthenticator(context => [context.authStatus]);
+  const { authStatus } = useAuthenticator(context => [context.authStatus]);
 
 
   // useEffect(() => {
@@ -145,15 +82,18 @@ const { authStatus } = useAuthenticator(context => [context.authStatus]);
   //   }
   // }, [user]);
 
-  if (authStatus === 'authenticated') {
-    return <Redirect href="/(tabs)" />;
-  }
-
-  return (
+  // If not authenticated, render the login stack
+ return (
+    // The main Stack navigator must be rendered unconditionally
     <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="index" />
-      <Stack.Screen name="(tabs)" />
+      {/* Conditionally render screens based on authentication status */}
+      {authStatus === 'authenticated' ? (
+        // If authenticated, render the tabs layout
+        <Stack.Screen name="(tabs)" redirect={true} />
+      ) : (
+        // If not authenticated, render the login screen
+        <Stack.Screen name="index" />
+      )}
     </Stack>
   );
 }
-
