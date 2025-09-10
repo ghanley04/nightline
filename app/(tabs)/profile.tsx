@@ -1,66 +1,93 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Alert, Switch } from 'react-native';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
 import { User, Mail, Phone, School, Bell, CreditCard, LogOut, Camera, MapPin } from 'lucide-react-native';
-import { useAuthStore } from '@/store/authStore';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
 import colors from '../../constants/colors';
-import { useAuth } from 'react-oidc-context';
+import { useAuthenticator } from '@aws-amplify/ui-react-native';
+import { fetchUserAttributes } from 'aws-amplify/auth';
+
+export async function getUserAttributes() {
+  try {
+    // The fetchUserAttributes method makes a secure API call to get all
+    // the user's attributes from the authentication service.
+    const userAttributes = await fetchUserAttributes();
+    console.log('User attributes fetched successfully:', userAttributes);
+    return userAttributes;
+  } catch (error) {
+    console.error('Error fetching user attributes:', error);
+    // Return null to indicate a failure in fetching the attributes.
+    return null;
+  }
+}
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, setUser, logout } = useAuthStore();
-  const auth = useAuth();
-
-  console.log("Full user object:", auth.user);
+  const { user } = useAuthenticator(context => [context.user]);
 
 
+  console.log("Full user object:", user);
+
+  const { authStatus } = useAuthenticator((context) => [context.authStatus]);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [locationEnabled, setLocationEnabled] = useState(true);
+  const [attributes, setAttributes] = useState(null);
 
-  const handleUpdatePhoto = async () => {
-    // Check if photo was updated in the last 3 months
-    const lastUpdate = new Date(user?.updatedAt || '');
-    const threeMonthsAgo = new Date();
-    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+  useEffect(() => {
+    const fetchAndSetAttributes = async () => {
+      // Only fetch attributes if the user is authenticated.
+      if (authStatus === 'authenticated') {
+        const userAttributes = await getUserAttributes();
+        setAttributes(userAttributes);
+      }
+    };
 
-    if (lastUpdate > threeMonthsAgo) {
-      Alert.alert(
-        'Photo Update Restricted',
-        'You can only update your photo once every 3 months for security reasons.',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
+    fetchAndSetAttributes();
+  }, [authStatus]); 
 
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  // const handleUpdatePhoto = async () => {
+  //   // Check if photo was updated in the last 3 months
+  //   const lastUpdate = new Date(user?.updatedAt || '');
+  //   const threeMonthsAgo = new Date();
+  //   threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
 
-    if (status !== 'granted') {
-      Alert.alert('Permission Required', 'Please allow access to your photo library to update your profile picture.');
-      return;
-    }
+  //   if (lastUpdate > threeMonthsAgo) {
+  //     Alert.alert(
+  //       'Photo Update Restricted',
+  //       'You can only update your photo once every 3 months for security reasons.',
+  //       [{ text: 'OK' }]
+  //     );
+  //     return;
+  //   }
 
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8,
-    });
+  //   const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
-    if (!result.canceled && user) {
-      // Update user photo
-      setUser({
-        ...user,
-        photoUrl: result.assets[0].uri,
-        updatedAt: new Date().toISOString(),
-      });
+  //   if (status !== 'granted') {
+  //     Alert.alert('Permission Required', 'Please allow access to your photo library to update your profile picture.');
+  //     return;
+  //   }
 
-      Alert.alert('Photo Updated', 'Your profile photo has been updated successfully.');
-    }
-  };
+  //   const result = await ImagePicker.launchImageLibraryAsync({
+  //     mediaTypes: ImagePicker.MediaTypeOptions.Images,
+  //     allowsEditing: true,
+  //     aspect: [1, 1],
+  //     quality: 0.8,
+  //   });
+
+  //   if (!result.canceled && user) {
+  //     // Update user photo
+  //     setUser({
+  //       ...user,
+  //       photoUrl: result.assets[0].uri,
+  //       updatedAt: new Date().toISOString(),
+  //     });
+
+  //     Alert.alert('Photo Updated', 'Your profile photo has been updated successfully.');
+  //   }
+  // };
 
   const handleLogout = () => {
     Alert.alert(
@@ -71,7 +98,7 @@ export default function ProfileScreen() {
         {
           text: 'Logout',
           onPress: () => {
-            logout();
+            // logout();
             router.replace('/');
           },
           style: 'destructive'
@@ -87,13 +114,13 @@ export default function ProfileScreen() {
 
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.profileHeader}>
-          <View style={styles.photoContainer}>
+          {/* <View style={styles.photoContainer}>
             {user?.photoUrl ? (
               <Image source={{ uri: user.photoUrl }} style={styles.photo} />
             ) : (
               <View style={styles.photoPlaceholder}>
                 <Text style={styles.photoPlaceholderText}>
-                  {user?.name?.charAt(0) || 'U'}
+                  {user?.username.charAt(0) || 'U'}
                 </Text>
               </View>
             )}
@@ -103,15 +130,15 @@ export default function ProfileScreen() {
             >
               <Camera size={16} color={colors.background} />
             </TouchableOpacity>
-          </View>
+          </View> */}
 
-          <Text style={styles.name}>{auth.user?.profile.email}</Text>
+          <Text style={styles.name}>{user?.username}</Text>
           <Text style={styles.userType}>
-            {user?.userType === 'individual' ? 'Individual Student' :
-              user?.userType === 'greek' ? 'Greek Life Member' : 'Guest'}
+            {user?.userId === 'individual' ? 'Individual Student' :
+              user?.userId === 'greek' ? 'Greek Life Member' : 'Guest'}
           </Text>
 
-          {user?.subscriptionActive ? (
+          {/* {user?.subscriptionActive ? (
             <View style={styles.subscriptionBadge}>
               <Text style={styles.subscriptionText}>Active Subscription</Text>
             </View>
@@ -122,7 +149,7 @@ export default function ProfileScreen() {
             >
               <Text style={styles.subscribeText}>Get Subscription</Text>
             </TouchableOpacity>
-          )}
+          )} */}
         </View>
 
         <View style={styles.section}>
@@ -135,7 +162,7 @@ export default function ProfileScreen() {
               </View>
               <View style={styles.infoContent}>
                 <Text style={styles.infoLabel}>Full Name</Text>
-                <Text style={styles.infoValue}>{auth.user?.profile.email}</Text>
+                <Text style={styles.infoValue}>{attributes?.email}</Text>
               </View>
             </View>
 
@@ -147,7 +174,7 @@ export default function ProfileScreen() {
               </View>
               <View style={styles.infoContent}>
                 <Text style={styles.infoLabel}>Email</Text>
-                <Text style={styles.infoValue}>{auth.user?.profile.email}</Text>
+                <Text style={styles.infoValue}>{attributes?.email}</Text>
               </View>
             </View>
 
@@ -159,7 +186,7 @@ export default function ProfileScreen() {
               </View>
               <View style={styles.infoContent}>
                 <Text style={styles.infoLabel}>Phone</Text>
-                <Text style={styles.infoValue}>{auth.user?.profile.phone_number}</Text>
+                <Text style={styles.infoValue}>{user?.userId}</Text>
               </View>
             </View>
 

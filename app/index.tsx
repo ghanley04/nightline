@@ -9,12 +9,32 @@ import Button from '@/components/Button';
 import colors from '@/constants/colors';
 import { useAuth } from "react-oidc-context";
 import { Suspense } from 'react';
+import { Authenticator, useAuthenticator } from '@aws-amplify/ui-react-native';
 
 
 
 
 export default function WelcomeScreen() {
   const router = useRouter();
+  const [showLogin, setShowLogin] = useState(false);
+  const { authStatus } = useAuthenticator(context => [context.authStatus]);
+
+  // useEffect(() => {
+  //   // Redirect authenticated users to the tabs layout
+  //   if (authStatus === 'authenticated') {
+  //     router.replace('/(tabs)');
+  //   }
+  // }, [authStatus, router]);
+
+  // const handleLoginPress = () => {
+  //   // Navigate to the new login screen
+  //   router.push('/login');
+  // };
+
+  const handleLoginPress = () => {
+    // This will navigate to the (tabs) route
+    router.replace('/(tabs)');
+  };
 
   return (
     <Suspense fallback={
@@ -58,13 +78,13 @@ export default function WelcomeScreen() {
         </View>
 
         <View style={styles.buttonContainer}>
-          {/* <Button
+          <Button
             title="Log In"
-            onPress={() => auth.signinRedirect()}
+            onPress={handleLoginPress}
             variant="primary"
             style={styles.loginButton}
             textStyle={styles.loginButtonText}
-          /> */}
+          />
         </View>
       </View>
     </Suspense>
