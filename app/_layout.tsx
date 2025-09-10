@@ -5,15 +5,59 @@ import * as SplashScreen from "expo-splash-screen";
 import { useEffect, useState } from "react";
 import React, { Suspense } from "react";
 import { StatusBar } from "expo-status-bar";
-import WelcomeScreen from "./index";
+// import WelcomeScreen from "./index";
 import { Authenticator, useAuthenticator } from '@aws-amplify/ui-react-native';
 import { Amplify } from 'aws-amplify';
 import config from '../src/aws-exports';
+import { Tabs } from 'expo-router';
+import { MapPin, QrCode, User, Bus } from 'lucide-react-native';
+import colors from '../constants/colors';
 
 Amplify.configure(config);
-
-// Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
+
+function LayoutContent() {
+  const router = useRouter();
+  // const { user } = useAuth();
+  const { authStatus } = useAuthenticator(context => [context.authStatus]);
+  const [isReady, setIsReady] = useState(false);
+
+  useEffect(() => {
+    // This is where you would load fonts or other assets
+    // For now, we'll just simulate a delay and hide the splash screen
+    setIsReady(true);
+    SplashScreen.hideAsync();
+  }, []);
+
+  // useEffect(() => {
+  //   // When auth state changes, redirect accordingly
+  //   if (user) {
+  //     router.replace("/(tabs)"); // user is logged in
+  //   } else {
+  //     router.replace("/"); // user not logged in
+  //   }
+  // }, [user]);
+
+
+  if (!isReady) {
+    return null; // Keep splash screen visible
+  }
+
+  // If not authenticated, render the login stack
+  return (
+    // The main Stack navigator must be rendered unconditionally
+    <Stack screenOptions={{ headerShown: false }}>
+      {/* Conditionally render screens based on authentication status */}
+      {authStatus === 'authenticated' ? (
+        // <Stack.Screen name="(tabs)" redirect={true} />
+        <Redirect href="/(tabs)" />
+      ) : (
+        // If not authenticated, render the login screen
+        <Stack.Screen name="index" />
+      )}
+    </Stack>
+  );
+}
 
 export default function RootLayout() {
   const [mapsReady, setMapsReady] = useState(false);
@@ -65,35 +109,4 @@ export default function RootLayout() {
         <LayoutContent />
       </Authenticator>
     </Authenticator.Provider>);
-}
-
-function LayoutContent() {
-  const router = useRouter();
-  // const { user } = useAuth();
-  const { authStatus } = useAuthenticator(context => [context.authStatus]);
-
-
-  // useEffect(() => {
-  //   // When auth state changes, redirect accordingly
-  //   if (user) {
-  //     router.replace("/(tabs)"); // user is logged in
-  //   } else {
-  //     router.replace("/"); // user not logged in
-  //   }
-  // }, [user]);
-
-  // If not authenticated, render the login stack
- return (
-    // The main Stack navigator must be rendered unconditionally
-    <Stack screenOptions={{ headerShown: false }}>
-      {/* Conditionally render screens based on authentication status */}
-      {authStatus === 'authenticated' ? (
-        // If authenticated, render the tabs layout
-        <Stack.Screen name="(tabs)" redirect={true} />
-      ) : (
-        // If not authenticated, render the login screen
-        <Stack.Screen name="index" />
-      )}
-    </Stack>
-  );
 }
