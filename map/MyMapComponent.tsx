@@ -1,62 +1,111 @@
-import React from 'react';
-import { View, StyleSheet } from 'react-native';
-import MapView, { Marker, Polyline } from 'react-native-maps';
+import Constants from 'expo-constants';
+import React, { useState, useEffect } from 'react';
+import MapView, { Polyline, Marker } from 'react-native-maps';
+import polyline from '@mapbox/polyline';
+// ... other imports ...
 
-const busRouteCoordinates = [
-  { latitude: 38.9511, longitude: -92.3260 }, // Broadway & College Ave
-  { latitude: 38.9500, longitude: -92.3230 }, // Broadway & 10th St
-  { latitude: 38.9465, longitude: -92.3235 }, // Cherry St & 10th St
-  { latitude: 38.9465, longitude: -92.3305 }, // Locust St & 7th St
-  { latitude: 38.9440, longitude: -92.3390 }, // Locust St & Providence Rd
-  { latitude: 38.9415, longitude: -92.3395 }, // Rollins St & Providence Rd
-  { latitude: 38.9405, longitude: -92.3335 }, // Rollins St & College Ave
-];
+// Access the key directly from the `extra` field defined in app.json
+const API_KEY = Constants.android.config.googleMapsApiKey;
 
-const stops = [
-  { latitude: 38.9511, longitude: -92.3260, title: "Stop 1" },
-  { latitude: 38.9465, longitude: -92.3235, title: "Stop 2" },
-  { latitude: 38.9440, longitude: -92.3390, title: "Stop 3" },
-  { latitude: 38.9405, longitude: -92.3335, title: "Stop 4" },
-];
+// ------------------------------------------------------------------
+// The rest of your constant setup remains the same, but the API_KEY
+// variable is now dynamic!
+// ------------------------------------------------------------------
 
-const MyMapComponent = () => {
+const START_END = { lat: 38.9426691, lng: -92.3267708 }; 
+// ... WAYPOINTS and helper functions ...
+
+const DIRECTIONS_API_URL = 
+  `https://maps.googleapis.com/maps/api/directions/json?` +
+  `origin=${formatCoord(START_END)}&` +
+  `destination=${formatCoord(START_END)}&` + 
+  `waypoints=${WAYPOINTS_STRING}&` +
+  `mode=driving&` +
+  // The key is now referenced from the Constants module
+  `key=${API_KEY}`;
+
+// ... The rest of your BusLoopMap component logic ...
+
+ // You need to install this: npm install @mapbox/polyline
+
+const BusLoopMap = () => {
+  const [routeCoordinates, setRouteCoordinates] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchAndDecodeRoute = async () => {
+    try {
+      const response = await fetch(DIRECTIONS_API_URL);
+      const json = await response.json();
+      
+      // Ensure the API returned a valid route
+      if (json.routes.length === 0) {
+        console.error('No route found.');
+        return;
+      }
+
+      // 1. Get the encoded string
+      const encodedPolyline = json.routes[0].overview_polyline.points;
+
+      // 2. Decode the string into an array of [lat, lng] arrays
+      const decoded = polyline.decode(encodedPolyline);
+      
+      // 3. Convert to the { latitude, longitude } format required by react-native-maps
+      const coordinates = decoded.map(point => ({
+        latitude: point[0],
+        longitude: point[1],
+      }));
+
+      setRouteCoordinates(coordinates);
+    } catch (error) {
+      console.error("Error fetching directions:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAndDecodeRoute();
+  }, []);
+
+  const allStops = [
+    { name: "MU Student Center (Start/End)", lat: START_END.lat, lng: START_END.lng },
+    ...WAYPOINTS
+  ];
+
   const initialRegion = {
-    latitude: 38.945,
-    longitude: -92.332,
-    latitudeDelta: 0.01,
-    longitudeDelta: 0.01,
+    latitude: START_END.lat,
+    longitude: START_END.lng,
+    latitudeDelta: 0.05, // Zoom level for the area
+    longitudeDelta: 0.05,
   };
 
   return (
-    <View style={styles.container}>
-      <MapView style={styles.map} initialRegion={initialRegion}>
-        {/* Polyline for route */}
+    <MapView
+      provider="google"
+      initialRegion={initialRegion}
+      style={{ flex: 1 }}
+      // You can add a ref here for programmatic map control (e.g., fitting the entire route)
+    >
+      {/* 🛑 RENDER THE BUS LOOP 🛑 */}
+      {routeCoordinates.length > 0 && (
         <Polyline
-          coordinates={busRouteCoordinates}
-          strokeColor="yellow"
-          strokeWidth={5}
+          coordinates={routeCoordinates}
+          strokeColor="#34495E" // Dark blue for the route line
+          strokeWidth={6}
+          lineCap="round"
         />
+      )}
 
-        {/* Markers for stops */}
-        {stops.map((stop, idx) => (
-          <Marker
-            key={idx}
-            coordinate={{ latitude: stop.latitude, longitude: stop.longitude }}
-            title={stop.title}
-          />
-        ))}
-      </MapView>
-    </View>
+      {/* RENDER MARKERS FOR EACH STOP */}
+      {allStops.map((stop, index) => (
+        <Marker
+          key={index}
+          coordinate={{ latitude: stop.lat, longitude: stop.lng }}
+          title={stop.name}
+        />
+      ))}
+      
+      {isLoading && <Text style={{ position: 'absolute', top: 50 }}>Loading Route...</Text>}
+    </MapView>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  map: {
-    ...StyleSheet.absoluteFillObject,
-  },
-});
-
-export default MyMapComponent;

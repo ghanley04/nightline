@@ -9,7 +9,7 @@ import { mockBuses, mockBusStops } from '@/mocks/busData';
 import { BusStop } from '@/types';
 import BusStopCard from '@/components/BusStopCard';
 import colors from '../../constants/colors';
-// import MyMapComponent from '@/map/MyMapComponent.native';
+import MapView, { Marker, PROVIDER_DEFAULT, PROVIDER_GOOGLE } from 'react-native-maps';
 
 
 export default function MapScreen() {
@@ -69,7 +69,20 @@ export default function MapScreen() {
 
       <View style={styles.mapContainer}>
         {/* This would be a real map in production */}
-        {/* <MyMapComponent/> */}
+        <MapView
+          style={{ flex: 1 }}
+          onMapReady={() => console.log("Map ready")}
+          onRegionChangeComplete={(region) => console.log(region)}
+          provider={PROVIDER_DEFAULT}
+          initialRegion={{
+            latitude: 38.9517,      // Downtown Columbia, MO
+            longitude: -92.3341,
+            latitudeDelta: 0.02,    // Zoomed in to city level
+            longitudeDelta: 0.02,
+          }}
+        >
+        </MapView>
+
 
         {/* Refresh button
         <TouchableOpacity 
