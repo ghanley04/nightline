@@ -5,6 +5,7 @@ expo-env.d.ts
 # @end expo-cli
 
 app/aws-exports.js
+app.json
 
 #amplify-do-not-edit-begin
 amplify/\#current-cloud-backend

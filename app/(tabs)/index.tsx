@@ -10,7 +10,7 @@ import { BusStop } from '@/types';
 import BusStopCard from '@/components/BusStopCard';
 import colors from '../../constants/colors';
 import MapView, { Marker, PROVIDER_DEFAULT, PROVIDER_GOOGLE } from 'react-native-maps';
-
+import MyMapComponent from '@/map/MyMapComponent';
 
 export default function MapScreen() {
   const router = useRouter();
@@ -69,7 +69,7 @@ export default function MapScreen() {
 
       <View style={styles.mapContainer}>
         {/* This would be a real map in production */}
-        <MapView
+        {/* <MapView
           style={{ flex: 1 }}
           onMapReady={() => console.log("Map ready")}
           onRegionChangeComplete={(region) => console.log(region)}
@@ -81,7 +81,8 @@ export default function MapScreen() {
             longitudeDelta: 0.02,
           }}
         >
-        </MapView>
+        </MapView> */}
+        <MyMapComponent></MyMapComponent>
 
 
         {/* Refresh button

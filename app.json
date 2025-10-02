@@ -53,6 +53,7 @@
       "router": {
         "origin": false
       },
+      "googleMapsApiKey": "AIzaSyBslAp0O6Z5vBFWS2lwIqLQ6Asp3YrRT8U",
       "eas": {
         "projectId": "8b818781-5d85-485b-a845-a9928d2d7f8c"
       }
