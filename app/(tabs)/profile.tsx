@@ -9,6 +9,7 @@ import Button from '@/components/Button';
 import colors from '../../constants/colors';
 import { useAuthenticator } from '@aws-amplify/ui-react-native';
 import { fetchUserAttributes } from 'aws-amplify/auth';
+import { signOut } from 'aws-amplify/auth';
 
 export async function getUserAttributes() {
   try {
@@ -27,6 +28,7 @@ export async function getUserAttributes() {
 export default function ProfileScreen() {
   const router = useRouter();
   const { user } = useAuthenticator(context => [context.user]);
+  //const { user } = useAuthenticator();
 
 
   console.log("Full user object:", user);
@@ -36,17 +38,17 @@ export default function ProfileScreen() {
   const [locationEnabled, setLocationEnabled] = useState(true);
   const [attributes, setAttributes] = useState(null);
 
-  useEffect(() => {
-    const fetchAndSetAttributes = async () => {
-      // Only fetch attributes if the user is authenticated.
-      if (authStatus === 'authenticated') {
-        const userAttributes = await getUserAttributes();
-        setAttributes(userAttributes);
-      }
-    };
+  // useEffect(() => {
+  //   const fetchAndSetAttributes = async () => {
+  //     // Only fetch attributes if the user is authenticated.
+  //     if (authStatus === 'authenticated') {
+  //       const userAttributes = await getUserAttributes();
+  //       setAttributes(userAttributes);
+  //     }
+  //   };
 
-    fetchAndSetAttributes();
-  }, [authStatus]); 
+  //   fetchAndSetAttributes();
+  // }, [authStatus]); 
 
   // const handleUpdatePhoto = async () => {
   //   // Check if photo was updated in the last 3 months
@@ -98,8 +100,7 @@ export default function ProfileScreen() {
         {
           text: 'Logout',
           onPress: () => {
-            // logout();
-            router.replace('/');
+            signOut();
           },
           style: 'destructive'
         }

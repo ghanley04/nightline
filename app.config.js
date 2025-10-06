@@ -1,4 +1,6 @@
-{
+import 'dotenv/config';
+
+export default {
   "expo": {
     "name": "nightline-app",
     "slug": "nightline-app",
@@ -13,12 +15,15 @@
       "bundleIdentifier": "com.anonymous.nightline-app",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
+      },
+      "config": {
+        "googleMapsApiKey": process.env.GOOGLE_MAPS_IOS_API_KEY
       }
     },
     "android": {
       "config": {
         "googleMaps": {
-          "apiKey": "AIzaSyBslAp0O6Z5vBFWS2lwIqLQ6Asp3YrRT8U"
+          "apiKey": process.env.GOOGLE_MAPS_ANDROID_API_KEY
         }
       },
       "adaptiveIcon": {
@@ -29,7 +34,7 @@
     },
     "web": {
       "bundler": "metro",
-      "output": "static",
+      "output": "server",
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
@@ -53,7 +58,7 @@
       "router": {
         "origin": false
       },
-      "googleMapsApiKey": "AIzaSyBslAp0O6Z5vBFWS2lwIqLQ6Asp3YrRT8U",
+      "googleMapsApiKey": process.env.GOOGLE_MAPS_ANDROID_API_KEY,
       "eas": {
         "projectId": "8b818781-5d85-485b-a845-a9928d2d7f8c"
       }
