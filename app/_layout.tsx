@@ -1,24 +1,18 @@
-import FontAwesome from "@expo/vector-icons/FontAwesome";
-import { useFonts } from "expo-font";
 import { Redirect, Stack, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { useEffect, useState } from "react";
-import React, { Suspense } from "react";
-import { StatusBar } from "expo-status-bar";
-// import WelcomeScreen from "./index";
-import { Authenticator, useAuthenticator } from '@aws-amplify/ui-react-native';
+import React, { useEffect, useState } from "react";
+import { Authenticator, useAuthenticator, ThemeProvider, defaultDarkModeOverride, Theme } from '@aws-amplify/ui-react-native';
+import { useColorScheme, StyleSheet } from 'react-native';
 import { Amplify } from 'aws-amplify';
 import config from '../src/aws-exports';
-import { Tabs } from 'expo-router';
-import { MapPin, QrCode, User, Bus } from 'lucide-react-native';
 import colors from '../constants/colors';
+import { LinearGradient } from "expo-linear-gradient";
 
 Amplify.configure(config);
 SplashScreen.preventAutoHideAsync();
 
 function LayoutContent() {
   const router = useRouter();
-  // const { user } = useAuth();
   const { authStatus } = useAuthenticator(context => [context.authStatus]);
   const [isReady, setIsReady] = useState(false);
 
@@ -29,30 +23,15 @@ function LayoutContent() {
     SplashScreen.hideAsync();
   }, []);
 
-  // useEffect(() => {
-  //   // When auth state changes, redirect accordingly
-  //   if (user) {
-  //     router.replace("/(tabs)"); // user is logged in
-  //   } else {
-  //     router.replace("/"); // user not logged in
-  //   }
-  // }, [user]);
-
-
   if (!isReady) {
     return null; // Keep splash screen visible
   }
-
   // If not authenticated, render the login stack
   return (
-    // The main Stack navigator must be rendered unconditionally
     <Stack screenOptions={{ headerShown: false }}>
-      {/* Conditionally render screens based on authentication status */}
       {authStatus === 'authenticated' ? (
-        // <Stack.Screen name="(tabs)" redirect={true} />
         <Redirect href="/(tabs)" />
       ) : (
-        // If not authenticated, render the login screen
         <Stack.Screen name="index" />
       )}
     </Stack>
@@ -60,53 +39,105 @@ function LayoutContent() {
 }
 
 export default function RootLayout() {
-  const [mapsReady, setMapsReady] = useState(false);
+  const [isReady, setIsReady] = useState(false);
+  const colorMode = useColorScheme();
 
+  // 1. SIMPLE useEffect to handle setup and hide the splash screen
   useEffect(() => {
-    // Keep splash screen visible until Maps + Auth are ready
-    SplashScreen.preventAutoHideAsync();
-
-    // Load Google Maps script on web
-    if (typeof window !== "undefined" && typeof document !== "undefined") {
-      if (!document.getElementById("google-maps")) {
-        const script = document.createElement("script");
-        script.id = "google-maps";
-        script.src =
-          "https://maps.googleapis.com/maps/api/js?key=AIzaSyBslAp0O6Z5vBFWS2lwIqLQ6Asp3YrRT8U&libraries=places";
-
-        // script.src = `https://maps.googleapis.com/maps/api/js?key=${
-        //   process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
-        // }&libraries=places`;
-        script.async = true;
-        script.defer = true;
-
-        script.onload = () => {
-          setMapsReady(true);
-          SplashScreen.hideAsync(); // ✅ hide splash once ready
-        };
-
-        script.onerror = () => {
-          console.error("Failed to load Google Maps script");
-          SplashScreen.hideAsync();
-        };
-
-        document.head.appendChild(script);
+    async function hideSplash() {
+      try {
+        await SplashScreen.hideAsync(); // This is the crucial line
+      } catch (e) {
+        console.warn("Splash screen hide error:", e);
+      } finally {
+        setIsReady(true);
       }
-    } else {
-      // Native doesn’t need script load
-      setMapsReady(true);
-      SplashScreen.hideAsync();
     }
-  }, []);
+    // Call the function to execute the hide logic
+    hideSplash();
+  }, []); // Run only once on component mount
 
-  if (!mapsReady) {
-    return null; // keep splash visible
+  if (!isReady) {
+    return null; // Don't render content until app is ready
   }
 
   return (
-    <Authenticator.Provider>
-      <Authenticator>
-        <LayoutContent />
-      </Authenticator>
-    </Authenticator.Provider>);
+    <ThemeProvider
+      colorMode={colorMode}
+      theme={{
+
+        tokens: {
+
+          colors: {
+            primary: {
+              10: colors.primary,
+              20: colors.primary,
+              40: colors.primary,
+              60: colors.primary,
+              80: colors.primary, //this one is default
+              90: colors.primary,
+              100: colors.primary,
+            },
+            background: {
+              primary: 'transparent',
+              secondary: 'transparent',
+              tertiary: 'transparent',
+            },
+            font: {
+              primary: colors.secondary,
+              secondary: colors.textLight,
+              tertiary: colors.textLight,
+            },
+          },
+        },
+
+        components: {
+          button: {
+            // Set the main background color
+            // backgroundColor: {
+            //   value: '#007BFF', // 👈 Change this to your desired color (e.g., a brand blue)
+            // },
+            // // Optional: Change the color when the button is pressed/active
+            // _active: {
+            //   backgroundColor: {
+            //     value: '#0056b3', // 👈 A slightly darker color for feedback
+            //   },
+            // },
+          },
+
+        },
+      }}
+    >
+      <LinearGradient
+        colors={[colors.secondary, '#222222']}
+        style={styles.container}
+      >
+        <Authenticator.Provider>
+          <Authenticator Container={(props) => (
+            <Authenticator.Container
+              {...props}
+              style={{ backgroundColor: 'transparent' }}
+            />
+          )}>
+
+            <LayoutContent />
+          </Authenticator>
+        </Authenticator.Provider>
+      </LinearGradient>
+    </ThemeProvider >
+  );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    justifyContent: 'space-between',
+  },
+  background: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+  },
+});

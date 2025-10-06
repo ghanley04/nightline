@@ -4,45 +4,47 @@ import MapView, { Marker, Polyline } from "react-native-maps";
 import { LatLng } from "react-native-maps";
 import Constants from 'expo-constants';
 // import { GOOGLE_MAPS_API_KEY } from "@env";
-// const API_KEY = Constants.android.config.googleMaps.apiKey;
-const API_KEY = Constants.expoConfig?.extra?.googleMapsApiKey;
+//const API_KEY = Constants.android.config.googleMaps.apiKey;
+//const API_KEY = Constants.expoConfig?.extra?.googleMapsApiKey;
 import MapViewDirections from "react-native-maps-directions";
 
 
 // const API_KEY = Constants.android.config.googleMapsApiKey;
-console.log("Loaded API key:", API_KEY);
+//console.log("Loaded OLD API key:", API_KEY);
 
 // Polyline decoder (Google-compatible)
-function decodePolyline(encoded: string) {
-  let points = [];
-  let index = 0, len = encoded.length;
-  let lat = 0, lng = 0;
+// function decodePolyline(encoded: string) {
+//   let points = [];
+//   let index = 0, len = encoded.length;
+//   let lat = 0, lng = 0;
 
-  while (index < len) {
-    let b, shift = 0, result = 0;
-    do {
-      b = encoded.charCodeAt(index++) - 63;
-      result |= (b & 0x1f) << shift;
-      shift += 5;
-    } while (b >= 0x20);
-    let dlat = (result & 1) ? ~(result >> 1) : (result >> 1);
-    lat += dlat;
+//   while (index < len) {
+//     let b, shift = 0, result = 0;
+//     do {
+//       b = encoded.charCodeAt(index++) - 63;
+//       result |= (b & 0x1f) << shift;
+//       shift += 5;
+//     } while (b >= 0x20);
+//     let dlat = (result & 1) ? ~(result >> 1) : (result >> 1);
+//     lat += dlat;
 
-    shift = 0;
-    result = 0;
-    do {
-      b = encoded.charCodeAt(index++) - 63;
-      result |= (b & 0x1f) << shift;
-      shift += 5;
-    } while (b >= 0x20);
-    let dlng = (result & 1) ? ~(result >> 1) : (result >> 1);
-    lng += dlng;
+//     shift = 0;
+//     result = 0;
+//     do {
+//       b = encoded.charCodeAt(index++) - 63;
+//       result |= (b & 0x1f) << shift;
+//       shift += 5;
+//     } while (b >= 0x20);
+//     let dlng = (result & 1) ? ~(result >> 1) : (result >> 1);
+//     lng += dlng;
 
-    points.push({ latitude: lat / 1e5, longitude: lng / 1e5 });
-  }
+//     points.push({ latitude: lat / 1e5, longitude: lng / 1e5 });
+//   }
 
-  return points;
-}
+//   return points;
+// }
+
+
 //needs permissions from google maps api - get rid of all restrictions
 // export default function MyMapComponent() {
 // const [routeCoords, setRouteCoords] = useState<LatLng[]>([]);
@@ -99,6 +101,11 @@ function decodePolyline(encoded: string) {
 //uses map markers
 export default function MyMapComponent() {
   const mapRef = useRef<MapView>(null);
+  const [apiKey, setApiKey] = useState<string>("");
+
+  useEffect(() => {
+    setApiKey(Constants.expoConfig?.extra?.googleMapsApiKey);
+  }, []);
 
   const origin = { latitude: 38.9457, longitude: -92.3280 }; // MU Student Center
   const destination = { latitude: 38.9457, longitude: -92.3280 }; // same for round trip
@@ -123,26 +130,30 @@ export default function MyMapComponent() {
         <Marker coordinate={origin} title="MU Student Center" />
         <Marker coordinate={waypoints[0]} title="Uprise Bakery" />
         <Marker coordinate={waypoints[1]} title="Shiloh Bar & Grill" />
+        {apiKey ? (
 
-        <MapViewDirections
-          origin={origin}
-          destination={destination}
-          waypoints={waypoints}
-          apikey={API_KEY}
-          strokeWidth={4}
-          strokeColor="red"
-          optimizeWaypoints={true}
-          onReady={result => {
-            // Auto-fit route in map
-            mapRef.current?.fitToCoordinates(result.coordinates, {
-              edgePadding: { top: 50, right: 50, bottom: 50, left: 50 },
-              animated: true,
-            });
-          }}
-          onError={(errorMessage) => {
-            console.error("MapViewDirections error:", errorMessage);
-          }}
-        />
+          <MapViewDirections
+            origin={origin}
+            destination={destination}
+            waypoints={waypoints}
+            apikey={apiKey}
+            strokeWidth={4}
+            strokeColor="red"
+            optimizeWaypoints={true}
+            onReady={result => {
+              // Auto-fit route in map
+              mapRef.current?.fitToCoordinates(result.coordinates, {
+                edgePadding: { top: 50, right: 50, bottom: 50, left: 50 },
+                animated: true,
+              });
+            }}
+            onError={(errorMessage) => {
+              console.error("MapViewDirections error:", errorMessage);
+            }}
+          />
+        ) : (
+          <View>Loading map...</View> // optional loading indicator
+        )}
       </MapView>
     </View>
   );
