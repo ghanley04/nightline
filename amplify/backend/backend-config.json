@@ -16,7 +16,8 @@
     }
   },
   "auth": {
-    "nightline": {
+    "nightline23285158": {
+      "customAuth": false,
       "dependsOn": [],
       "frontendAuthConfig": {
         "mfaConfiguration": "OFF",
@@ -28,7 +29,11 @@
           "passwordPolicyMinLength": 8
         },
         "signupAttributes": [
-          "EMAIL"
+          "EMAIL",
+          "FAMILY_NAME",
+          "GIVEN_NAME",
+          "PHONE_NUMBER",
+          "PREFERRED_USERNAME"
         ],
         "socialProviders": [],
         "usernameAttributes": [],
@@ -37,8 +42,7 @@
         ]
       },
       "providerPlugin": "awscloudformation",
-      "service": "Cognito",
-      "serviceType": "managed"
+      "service": "Cognito"
     }
   },
   "function": {
@@ -64,6 +68,17 @@
           "resourceName": "nightlineLane"
         }
       ]
+    }
+  },
+  "storage": {
+    "profilePhotos": {
+      "dependsOn": [],
+      "output": {
+        "BucketName": "nightline-profile-photos-bucket",
+        "Region": "us-east-2"
+      },
+      "providerPlugin": "awscloudformation",
+      "service": "S3"
     }
   }
 }

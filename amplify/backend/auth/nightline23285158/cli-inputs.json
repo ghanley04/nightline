@@ -1,10 +1,10 @@
 {
   "version": "1",
   "cognitoConfig": {
-    "identityPoolName": "nightline_identitypool_cfa828a0",
+    "identityPoolName": "nightline23285158_identitypool_23285158",
     "allowUnauthenticatedIdentities": false,
-    "resourceNameTruncated": "nightlcfa828a0",
-    "userPoolName": "nightline_userpool_cfa828a0",
+    "resourceNameTruncated": "nightl23285158",
+    "userPoolName": "nightline23285158_userpool_23285158",
     "autoVerifiedAttributes": [
       "email"
     ],
@@ -20,7 +20,11 @@
     "passwordPolicyMinLength": 8,
     "passwordPolicyCharacters": [],
     "requiredAttributes": [
-      "email"
+      "email",
+      "family_name",
+      "given_name",
+      "phone_number",
+      "preferred_username"
     ],
     "aliasAttributes": [],
     "userpoolClientGenerateSecret": false,
@@ -31,12 +35,16 @@
     "userpoolClientReadAttributes": [
       "email"
     ],
-    "userpoolClientLambdaRole": "nightlcfa828a0_userpoolclient_lambda_role",
+    "userpoolClientLambdaRole": "nightl23285158_userpoolclient_lambda_role",
     "userpoolClientSetAttributes": false,
+    "sharedId": "23285158",
+    "resourceName": "nightline23285158",
     "authSelections": "identityPoolAndUserPool",
-    "resourceName": "nightline",
-    "sharedId": "cfa828a0",
+    "useDefault": "default",
+    "triggers": {},
+    "userPoolGroupList": [],
     "serviceName": "Cognito",
-    "useDefault": "manual"
+    "usernameCaseSensitive": false,
+    "useEnabledMfas": true
   }
 }

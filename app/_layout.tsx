@@ -2,7 +2,9 @@ import { Redirect, Stack, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect, useState } from "react";
 import { Authenticator, useAuthenticator, ThemeProvider, defaultDarkModeOverride, Theme } from '@aws-amplify/ui-react-native';
-import { useColorScheme, StyleSheet } from 'react-native';
+import { useColorScheme, StyleSheet, View, ViewProps } from 'react-native';
+import { PropsWithChildren, FunctionComponent } from 'react';
+import { I18n } from '@aws-amplify/core';
 import { Amplify } from 'aws-amplify';
 import config from '../src/aws-exports';
 import colors from '../constants/colors';
@@ -10,6 +12,7 @@ import { LinearGradient } from "expo-linear-gradient";
 
 Amplify.configure(config);
 SplashScreen.preventAutoHideAsync();
+
 
 function LayoutContent() {
   const router = useRouter();
@@ -29,11 +32,7 @@ function LayoutContent() {
   // If not authenticated, render the login stack
   return (
     <Stack screenOptions={{ headerShown: false }}>
-      {authStatus === 'authenticated' ? (
-        <Redirect href="/(tabs)" />
-      ) : (
-        <Stack.Screen name="index" />
-      )}
+      <Redirect href="/(tabs)" />
     </Stack>
   );
 }
@@ -41,6 +40,8 @@ function LayoutContent() {
 export default function RootLayout() {
   const [isReady, setIsReady] = useState(false);
   const colorMode = useColorScheme();
+
+
 
   // 1. SIMPLE useEffect to handle setup and hide the splash screen
   useEffect(() => {
@@ -84,7 +85,7 @@ export default function RootLayout() {
               tertiary: 'transparent',
             },
             font: {
-              primary: colors.secondary,
+              primary: colors.textLight,
               secondary: colors.textLight,
               tertiary: colors.textLight,
             },
@@ -113,13 +114,74 @@ export default function RootLayout() {
         style={styles.container}
       >
         <Authenticator.Provider>
-          <Authenticator Container={(props) => (
-            <Authenticator.Container
-              {...props}
-              style={{ backgroundColor: 'transparent' }}
-            />
-          )}>
+          <Authenticator
+            components={{
+              SignUp: ({ fields, ...props }) => (
+                <Authenticator.SignUp
+                  {...props}
+                  fields={[
+                    {
+                      name: 'username',
+                      label: 'Username',
+                      type: 'default',
+                      placeholder: 'Enter your username',
+                      required: true,
+                    },
+                    {
+                      name: 'email',
+                      label: 'Email Address',
+                      type: 'email',
+                      placeholder: 'Enter your email address',
+                      required: true,
+                    },
+                    {
+                      name: 'given_name',
+                      label: 'First Name',
+                      type: 'default',
+                      placeholder: 'Enter your First Name',
+                      required: true,
+                    },
+                    {
+                      name: 'family_name',
+                      label: 'Last Name',
+                      type: 'default',
+                      placeholder: 'Enter your Last Name',
+                      required: true,
+                    }, 
+                    {
+                    //fix the number input later
+                      name: 'phone_number',
+                      label: 'Phone Number',
+                      type: 'phone',
+                      placeholder: '+1 (XXX)-XXX-XXXX',
+                      required: true,
+                    },
+                    {
+                      name: 'password',
+                      label: 'Password',
+                      type: 'password',
+                      placeholder: 'Enter a password',
+                      required: true,
+                    },
+                    {
+                      name: 'confirm_password',
+                      label: 'Confirm Password',
+                      type: 'password',
+                      placeholder: 'Confirm your password',
+                      required: true,
+                    },
+                  ]}
+                />
+              ),
+            }}
+          >
+            {/* Container={(...props) => ( */}
+            {/* // reuse default `Container` and apply custom background */}
+            {/* // <Authenticator.Container */}
+            {/* //   {...props} */}
+            {/* //   style={{ backgroundColor: 'transparent' }} */}
 
+            {/* // /> */}
             <LayoutContent />
           </Authenticator>
         </Authenticator.Provider>
