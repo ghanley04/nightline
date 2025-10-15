@@ -19,11 +19,11 @@
           "s3Key": "amplify-builds/nightlineLane-42484c62687732466a2f-build.zip"
         }
       },
-      "auth": {
-        "nightline": {}
-      },
       "api": {
         "apiNightline": {}
+      },
+      "auth": {
+        "nightline23285158": {}
       }
     }
   }

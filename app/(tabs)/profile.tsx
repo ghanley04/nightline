@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Alert, Switch } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Alert, Switch, TextInput, Modal } from 'react-native';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
@@ -8,19 +8,18 @@ import Card from '@/components/Card';
 import Button from '@/components/Button';
 import colors from '../../constants/colors';
 import { useAuthenticator } from '@aws-amplify/ui-react-native';
-import { fetchUserAttributes } from 'aws-amplify/auth';
+import { fetchUserAttributes, UserAttributeKey, updateUserAttributes, confirmUserAttribute } from 'aws-amplify/auth';
 import { signOut } from 'aws-amplify/auth';
+import type { VerifiableUserAttributeKey } from "@aws-amplify/auth";
+
 
 export async function getUserAttributes() {
   try {
-    // The fetchUserAttributes method makes a secure API call to get all
-    // the user's attributes from the authentication service.
     const userAttributes = await fetchUserAttributes();
     console.log('User attributes fetched successfully:', userAttributes);
     return userAttributes;
   } catch (error) {
     console.error('Error fetching user attributes:', error);
-    // Return null to indicate a failure in fetching the attributes.
     return null;
   }
 }
@@ -28,7 +27,6 @@ export async function getUserAttributes() {
 export default function ProfileScreen() {
   const router = useRouter();
   const { user } = useAuthenticator(context => [context.user]);
-  //const { user } = useAuthenticator();
 
 
   console.log("Full user object:", user);
@@ -36,7 +34,234 @@ export default function ProfileScreen() {
   const { authStatus } = useAuthenticator((context) => [context.authStatus]);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [locationEnabled, setLocationEnabled] = useState(true);
-  const [attributes, setAttributes] = useState(null);
+  const [attributes, setAttributes] = useState<Partial<Record<UserAttributeKey, string>> | null>(null);
+  const firstName = attributes?.given_name || '';
+  const lastName = attributes?.family_name || '';
+
+  // 1. State to track edit mode
+  const [isEditing, setIsEditing] = useState(false);
+
+  // 2. State to hold editable values (draft)
+  const [draftAttributes, setDraftAttributes] = useState<Partial<Record<UserAttributeKey, string>> | null>(null);
+
+
+  // Create the full name by joining them with a space
+  const fullName = (firstName && lastName)
+    ? `${firstName} ${lastName}`
+    : attributes?.username;
+
+  useEffect(() => {
+    const fetchAndSetAttributes = async () => {
+      // Only fetch attributes if the user is authenticated.
+      if (authStatus === 'authenticated') {
+        const userAttributes = await getUserAttributes();
+        setAttributes(userAttributes);
+        setDraftAttributes(userAttributes);
+      }
+    };
+
+    fetchAndSetAttributes();
+  }, [authStatus]);
+
+  // Inside ProfileScreen()
+
+  // Function to handle changes in text inputs
+  const handleInputChange = (key: UserAttributeKey, value: string) => {
+    setDraftAttributes(prev => ({
+      ...prev,
+      [key]: value,
+    }));
+  };
+
+  // Function to send updates to AWS Amplify
+  // const handleSave = async () => {
+  //   if (!draftAttributes) return;
+
+  //   // Prepare the update object, mapping draft values to Cognito attribute keys
+  //   const attributesToUpdate: Record<string, string> = {};
+
+  //   // Check which attributes actually changed before sending
+  //   (Object.keys(draftAttributes) as UserAttributeKey[]).forEach(key => {
+  //     // Only include attributes that exist and are different from the original
+  //     if (draftAttributes[key] !== attributes?.[key] && draftAttributes[key]) {
+  //       // Use the Amplify attribute key name
+  //       attributesToUpdate[key] = draftAttributes[key]!;
+  //     }
+  //   });
+
+  //   if (Object.keys(attributesToUpdate).length === 0) {
+  //     Alert.alert("No Changes", "No profile changes were detected.");
+  //     setIsEditing(false);
+  //     return;
+  //   }
+
+  //   try {
+  //     const output = await updateUserAttributes({
+  //       userAttributes: attributesToUpdate,
+  //     });
+
+  //     if (output.isUpdated) {
+  //       Alert.alert("Success", "Your profile has been updated.");
+  //     } else if (output.nextStep.updateAttributeStep === 'CONFIRM_ATTRIBUTE_WITH_CODE') {
+  //       // This happens when changing email or phone, which requires verification
+  //       Alert.alert(
+  //         "Verification Required",
+  //         `A code has been sent to confirm the update to your ${output.nextStep.type}.`
+  //       );
+  //     }
+
+  //     // Re-fetch the latest attributes from the server and exit edit mode
+  //     const updatedAttributes = await getUserAttributes();
+  //     setAttributes(updatedAttributes);
+  //     setDraftAttributes(updatedAttributes || {});
+  //     setIsEditing(false);
+
+  //   } catch (error) {
+  //     console.error('Error updating profile:', error);
+  //     Alert.alert('Update Failed', 'There was an error updating your profile.');
+  //   }
+  // };
+
+  // Function to send updates to AWS Amplify
+  // Function to send updates to AWS Amplify
+  const handleSave = async () => {
+    if (!draftAttributes) return;
+
+    const attributesToUpdate: Record<string, string> = {};
+
+    (Object.keys(draftAttributes) as UserAttributeKey[]).forEach(key => {
+      if (draftAttributes[key] !== attributes?.[key] && draftAttributes[key]) {
+        attributesToUpdate[key] = draftAttributes[key]!;
+      }
+    });
+
+    if (Object.keys(attributesToUpdate).length === 0) {
+      Alert.alert("No Changes", "No profile changes were detected.");
+      setIsEditing(false);
+      return;
+    }
+
+    try {
+      const output = await updateUserAttributes({
+        userAttributes: attributesToUpdate,
+      });
+
+      console.log("Update result:", output);
+
+      // Check per-attribute update results
+      let verificationRequired = false;
+      let pendingAttribute: UserAttributeKey | null = null;
+      let destination: string | undefined;
+
+      for (const key of Object.keys(output) as UserAttributeKey[]) {
+        const attrResult = output[key];
+        if (attrResult?.nextStep?.updateAttributeStep === 'CONFIRM_ATTRIBUTE_WITH_CODE') {
+          verificationRequired = true;
+          pendingAttribute = key;
+          destination = attrResult.nextStep.codeDeliveryDetails?.destination;
+          break; // handle one at a time for now
+        }
+      }
+
+      if (verificationRequired && pendingAttribute) {
+        // Show modal for code entry (from previous step)
+        setVerificationState({
+          attributeKey: pendingAttribute,
+          showModal: true,
+          code: '',
+        });
+
+        // Alert.alert(
+        //   "Verification Required",
+        //   `A code was sent to your ${pendingAttribute} ending in ${destination || '***'}. Please enter it below.`
+        // );
+        setDraftAttributes(attributes || {});
+        setIsEditing(false);
+        return;
+      }
+
+      // If no verification needed, everything was updated immediately
+      Alert.alert("Success", "Your profile has been updated.");
+
+      const updatedAttributes = await getUserAttributes();
+      setAttributes(updatedAttributes);
+      setDraftAttributes(updatedAttributes || {});
+      setIsEditing(false);
+
+    } catch (error) {
+      console.error('Error updating profile:', error);
+      Alert.alert('Update Failed', 'There was an error updating your profile.');
+      setDraftAttributes(attributes || {});
+      setIsEditing(false);
+    }
+  };
+
+  // New function to handle the confirmation step
+  const handleConfirmUpdate = async (attributeKey: UserAttributeKey, code: string) => {
+    // Only verifiable attributes can be confirmed
+    if (attributeKey !== 'email' && attributeKey !== 'phone_number') {
+      console.warn(`Skipping confirmUserAttribute for non-verifiable key: ${attributeKey}`);
+      Alert.alert(
+        "Invalid Verification",
+        "Only email or phone number can be verified."
+      );
+      return;
+    }
+
+    try {
+      await confirmUserAttribute({
+        userAttributeKey: attributeKey as VerifiableUserAttributeKey,
+        confirmationCode: code,
+      });
+
+      Alert.alert(
+        "Confirmed",
+        "Your new contact information is now verified and saved."
+      );
+
+      // Refresh the user attributes to show the verified value
+      const updatedAttributes = await getUserAttributes();
+      setAttributes(updatedAttributes);
+      setDraftAttributes(updatedAttributes || {});
+
+    } catch (error) {
+      console.error('Error confirming attribute:', error);
+      Alert.alert(
+        'Verification Failed',
+        'The code was incorrect or expired. Please try updating your information again or request a new code.'
+      );
+
+      // Revert drafts so user data isn’t stuck in an inconsistent state
+      setDraftAttributes(attributes || {});
+    }
+  };
+
+  async function handleUpdateAttributes(
+    updatedFirstName: string,
+    updatedLastName: string,
+    updatedEmail: string,
+    updatedPhone: string,
+  ) {
+    try {
+      const attributes = await updateUserAttributes({
+        userAttributes: {
+          given_name: updatedFirstName,
+          family_name: updatedLastName,
+          email: updatedEmail,
+          phone: updatedPhone
+        }
+      });
+      // handle next steps
+    } catch (error) {
+      console.log(error);
+    }
+  }
+
+  const handleCancel = () => {
+    // Revert draft attributes to the original fetched attributes
+    setDraftAttributes(attributes || {});
+    setIsEditing(false);
+  };
 
   // useEffect(() => {
   //   const fetchAndSetAttributes = async () => {
@@ -108,6 +333,35 @@ export default function ProfileScreen() {
     );
   };
 
+  const [verificationState, setVerificationState] = useState<{
+    attributeKey?: UserAttributeKey;
+    showModal: boolean;
+    code: string;
+  }>({ showModal: false, code: '' });
+
+
+  const renderInfoField = (label: string, key: UserAttributeKey, value: string, icon: JSX.Element, type: string = 'default') => (
+    <View>
+      <View style={styles.infoItem}>
+        <View style={styles.infoIcon}>{icon}</View>
+        <View style={styles.infoContent}>
+          <Text style={styles.infoLabel}>{label}</Text>
+          {isEditing ? (
+            <TextInput
+              // style={styles.infoInput} // You'll need to define this style
+              value={draftAttributes[key]}
+              onChangeText={(text) => handleInputChange(key, text)}
+              // type={type}
+              placeholder={value}
+            />
+          ) : (
+            <Text style={styles.infoValue}>{value}</Text>
+          )}
+        </View>
+      </View>
+      <View style={styles.divider} />
+    </View>
+  );
 
   return (
     <View style={styles.container}>
@@ -155,63 +409,102 @@ export default function ProfileScreen() {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Personal Information</Text>
-
           <Card style={styles.infoCard}>
-            <View style={styles.infoItem}>
-              <View style={styles.infoIcon}>
-                <User size={18} color={colors.primary} />
-              </View>
-              <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>Full Name</Text>
-                <Text style={styles.infoValue}>{attributes?.email}</Text>
-              </View>
-            </View>
+            {/* Full Name (Concatenating edited names) */}
+            {renderInfoField(
+              'First Name',
+              'given_name', // Cognito key
+              draftAttributes?.given_name || '',
+              <User size={18} color={colors.primary} />
+            )}
+            {renderInfoField(
+              'Last Name',
+              'family_name', // Cognito key
+              draftAttributes?.family_name || '',
+              <User size={18} color={colors.primary} />
+            )}
 
-            <View style={styles.divider} />
+            {/* Email */}
+            {renderInfoField(
+              'Email',
+              'email', // Cognito key
+              draftAttributes?.email || '',
+              <Mail size={18} color={colors.primary} />,
+              'email-address'
+            )}
 
-            <View style={styles.infoItem}>
-              <View style={styles.infoIcon}>
-                <Mail size={18} color={colors.primary} />
-              </View>
-              <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>Email</Text>
-                <Text style={styles.infoValue}>{attributes?.email}</Text>
-              </View>
-            </View>
+            {/* Phone Number */}
+            {renderInfoField(
+              'Phone',
+              'phone_number', // Cognito key
+              draftAttributes?.phone_number || '',
+              <Phone size={18} color={colors.primary} />,
+              'phone'
+            )}
 
-            <View style={styles.divider} />
-
-            <View style={styles.infoItem}>
-              <View style={styles.infoIcon}>
-                <Phone size={18} color={colors.primary} />
-              </View>
-              <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>Phone</Text>
-                <Text style={styles.infoValue}>{user?.userId}</Text>
-              </View>
-            </View>
-
-            {/* <View style={styles.divider} />
-
-            <View style={styles.infoItem}>
-              <View style={styles.infoIcon}>
-                <School size={18} color={colors.primary} />
-              </View>
-              <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>School</Text>
-                <Text style={styles.infoValue}>{user?.schoolAffiliation}</Text>
-              </View>
-            </View> */}
           </Card>
 
-          <TouchableOpacity style={styles.editButton}>
-            <Text style={styles.editButtonText}>Edit Information</Text>
-          </TouchableOpacity>
+          <Modal
+            visible={verificationState.showModal}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setVerificationState({ showModal: false, code: '' })}
+          >
+            <View style={styles.modalContainer} /* 👈 ADDED STYLE */>
+              <View style={styles.modalView} /* 👈 ADDED STYLE */>
+                <Text style={styles.modalTitle}>Enter Verification Code</Text>
+                <TextInput
+                  placeholder="Verification Code"
+                  value={verificationState.code}
+                  onChangeText={(text) => setVerificationState(prev => ({ ...prev, code: text }))}
+                  keyboardType="numeric"
+
+                />
+                <View >
+                  <TouchableOpacity
+                    onPress={() => setVerificationState({ showModal: false, code: '' })}
+                  >
+                    <Text >Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => {
+                      if (verificationState.attributeKey && verificationState.code) {
+                        handleConfirmUpdate(verificationState.attributeKey, verificationState.code);
+                        setVerificationState({ showModal: false, code: '' });
+                      } else {
+                        Alert.alert('Error', 'Please enter a valid code.');
+                      }
+                    }}
+                  >
+                    <Text >Confirm</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </Modal>
+
+          {/* *** Conditional Edit/Save/Cancel Buttons *** */}
+          {isEditing ? (
+            <View>
+              <TouchableOpacity style={styles.editButton} onPress={handleCancel}>
+                <Text style={styles.editButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.editButton} onPress={handleSave}>
+                <Text style={styles.editButtonText}>Save Changes</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={styles.editButton}
+              onPress={() => setIsEditing(true)} // Enter edit mode
+            >
+              <Text style={styles.modalButtonConfirmText}>Edit Information</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>App Settings</Text>
-
           <Card style={styles.settingsCard}>
             <View style={styles.settingItem}>
               <View style={styles.settingInfo}>
@@ -270,8 +563,8 @@ export default function ProfileScreen() {
           variant="secondary"
           style={styles.logoutButton}
         />
-      </ScrollView>
-    </View>
+      </ScrollView >
+    </View >
   );
 }
 
@@ -462,5 +755,59 @@ const styles = StyleSheet.create({
   },
   logoutButton: {
     marginTop: 16,
+  },
+  modalContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)', // Semi-transparent black overlay
+  },
+  modalView: {
+    margin: 20,
+    backgroundColor: 'white', // Ensure modal content is visible
+    borderRadius: 10,
+    padding: 35,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+    width: '80%', // Make it a good size
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 15,
+    color: colors.text,
+  },
+  modalInput: {
+    height: 40,
+    width: '100%',
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: 5,
+    paddingHorizontal: 10,
+    marginBottom: 20,
+    color: colors.text, // Make sure the text color is visible
+  },
+  modalButtonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+    paddingHorizontal: 10,
+  },
+  modalButtonCancelText: {
+    color: colors.textLight,
+    fontWeight: '600',
+    padding: 10,
+  },
+  modalButtonConfirmText: {
+    color: colors.primary,
+    fontWeight: '600',
+    padding: 10,
   },
 });
