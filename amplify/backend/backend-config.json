@@ -16,11 +16,11 @@
     }
   },
   "auth": {
-    "nightline23285158": {
+    "nightlinebb4e8bac": {
       "customAuth": false,
       "dependsOn": [],
       "frontendAuthConfig": {
-        "mfaConfiguration": "OFF",
+        "mfaConfiguration": "OPTIONAL",
         "mfaTypes": [
           "SMS"
         ],
@@ -71,6 +71,11 @@
     }
   },
   "storage": {
+    "NightlineProfileImages": {
+      "dependsOn": [],
+      "providerPlugin": "awscloudformation",
+      "service": "S3"
+    },
     "profilePhotos": {
       "dependsOn": [],
       "output": {
