@@ -3,10 +3,8 @@ import { View, Dimensions } from "react-native";
 import MapView, { Marker, Polyline } from "react-native-maps";
 import { LatLng } from "react-native-maps";
 import Constants from 'expo-constants';
-// import { GOOGLE_MAPS_API_KEY } from "@env";
-//const API_KEY = Constants.android.config.googleMaps.apiKey;
-//const API_KEY = Constants.expoConfig?.extra?.googleMapsApiKey;
 import MapViewDirections from "react-native-maps-directions";
+import colors from '../constants/colors';
 
 
 // const API_KEY = Constants.android.config.googleMapsApiKey;
@@ -138,7 +136,7 @@ export default function MyMapComponent() {
             waypoints={waypoints}
             apikey={apiKey}
             strokeWidth={4}
-            strokeColor="red"
+            strokeColor={colors.primary}
             optimizeWaypoints={true}
             onReady={result => {
               // Auto-fit route in map

@@ -2,16 +2,15 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Alert, Switch, TextInput, Modal } from 'react-native';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import * as ImagePicker from 'expo-image-picker';
-import { User, Mail, Phone, School, Bell, CreditCard, LogOut, Camera, MapPin } from 'lucide-react-native';
+import { User, Mail, Phone, Bell, CreditCard, Camera, MapPin } from 'lucide-react-native';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
 import colors from '../../constants/colors';
 import { useAuthenticator } from '@aws-amplify/ui-react-native';
-import { fetchUserAttributes, UserAttributeKey, updateUserAttributes, confirmUserAttribute } from 'aws-amplify/auth';
-import { signOut } from 'aws-amplify/auth';
+import { signOut, fetchUserAttributes, UserAttributeKey, updateUserAttributes, confirmUserAttribute, getCurrentUser } from 'aws-amplify/auth';
 import type { VerifiableUserAttributeKey } from "@aws-amplify/auth";
-
+import * as ImagePicker from 'expo-image-picker';
+import { uploadData, getUrl } from 'aws-amplify/storage';
 
 export async function getUserAttributes() {
   try {
@@ -28,8 +27,7 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { user } = useAuthenticator(context => [context.user]);
 
-
-  console.log("Full user object:", user);
+  // console.log("Full user object:", user);
 
   const { authStatus } = useAuthenticator((context) => [context.authStatus]);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
@@ -63,8 +61,6 @@ export default function ProfileScreen() {
     fetchAndSetAttributes();
   }, [authStatus]);
 
-  // Inside ProfileScreen()
-
   // Function to handle changes in text inputs
   const handleInputChange = (key: UserAttributeKey, value: string) => {
     setDraftAttributes(prev => ({
@@ -73,57 +69,6 @@ export default function ProfileScreen() {
     }));
   };
 
-  // Function to send updates to AWS Amplify
-  // const handleSave = async () => {
-  //   if (!draftAttributes) return;
-
-  //   // Prepare the update object, mapping draft values to Cognito attribute keys
-  //   const attributesToUpdate: Record<string, string> = {};
-
-  //   // Check which attributes actually changed before sending
-  //   (Object.keys(draftAttributes) as UserAttributeKey[]).forEach(key => {
-  //     // Only include attributes that exist and are different from the original
-  //     if (draftAttributes[key] !== attributes?.[key] && draftAttributes[key]) {
-  //       // Use the Amplify attribute key name
-  //       attributesToUpdate[key] = draftAttributes[key]!;
-  //     }
-  //   });
-
-  //   if (Object.keys(attributesToUpdate).length === 0) {
-  //     Alert.alert("No Changes", "No profile changes were detected.");
-  //     setIsEditing(false);
-  //     return;
-  //   }
-
-  //   try {
-  //     const output = await updateUserAttributes({
-  //       userAttributes: attributesToUpdate,
-  //     });
-
-  //     if (output.isUpdated) {
-  //       Alert.alert("Success", "Your profile has been updated.");
-  //     } else if (output.nextStep.updateAttributeStep === 'CONFIRM_ATTRIBUTE_WITH_CODE') {
-  //       // This happens when changing email or phone, which requires verification
-  //       Alert.alert(
-  //         "Verification Required",
-  //         `A code has been sent to confirm the update to your ${output.nextStep.type}.`
-  //       );
-  //     }
-
-  //     // Re-fetch the latest attributes from the server and exit edit mode
-  //     const updatedAttributes = await getUserAttributes();
-  //     setAttributes(updatedAttributes);
-  //     setDraftAttributes(updatedAttributes || {});
-  //     setIsEditing(false);
-
-  //   } catch (error) {
-  //     console.error('Error updating profile:', error);
-  //     Alert.alert('Update Failed', 'There was an error updating your profile.');
-  //   }
-  // };
-
-  // Function to send updates to AWS Amplify
-  // Function to send updates to AWS Amplify
   const handleSave = async () => {
     if (!draftAttributes) return;
 
@@ -236,85 +181,85 @@ export default function ProfileScreen() {
     }
   };
 
-  async function handleUpdateAttributes(
-    updatedFirstName: string,
-    updatedLastName: string,
-    updatedEmail: string,
-    updatedPhone: string,
-  ) {
+  async function pickAndUploadProfilePhoto() {
     try {
-      const attributes = await updateUserAttributes({
-        userAttributes: {
-          given_name: updatedFirstName,
-          family_name: updatedLastName,
-          email: updatedEmail,
-          phone: updatedPhone
-        }
+      // Let user select an image
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.8,
       });
-      // handle next steps
-    } catch (error) {
-      console.log(error);
+
+      if (result.canceled) return;
+
+      const uri = result.assets[0].uri;
+      const response = await fetch(uri);
+      const blob = await response.blob();
+
+      // Get current authenticated user
+      const user = await getCurrentUser();
+      const userId = user.userId; // or user.username depending on config
+
+      const key = `profile/${userId}.jpg`;
+
+      // Upload image to S3
+      const upload = await uploadData({
+        key,
+        data: blob,
+        options: {
+          accessLevel: 'private',
+          contentType: 'image/jpeg',
+        },
+      });
+      await upload.result;
+
+      console.log('✅ Uploaded profile photo:', key);
+      await fetchProfilePhoto();
+    } catch (err) {
+      console.error('❌ Upload error:', err);
     }
   }
+
+  const [imageUrl, setImageUrl] = useState('');
+
+  async function fetchProfilePhoto() {
+    try {
+      const user = await getCurrentUser();
+      const key = `profile/${user.userId}.jpg`;
+
+      const { url } = await getUrl({
+        key: key,
+        options: {
+          accessLevel: 'private', 
+          validateObjectExistence: true, // Optional: checks if the object exists before returning a URL
+          expiresIn: 3600 // Optional: URL validity in seconds (default is 900 seconds)
+        },
+      });
+
+      console.log('🖼️ Fetched signed URL:', url.toString());
+      setImageUrl(url.toString());
+    } catch (err) {
+      console.error('❌ Fetch error:', err);
+    }
+  }
+
+  useEffect(() => {
+    const fetchAndSetAttributes = async () => {
+      if (authStatus === 'authenticated') {
+        const userAttributes = await getUserAttributes();
+        setAttributes(userAttributes);
+        setDraftAttributes(userAttributes);
+        await fetchProfilePhoto();
+      }
+    };
+
+    fetchAndSetAttributes();
+  }, [authStatus]);
 
   const handleCancel = () => {
     // Revert draft attributes to the original fetched attributes
     setDraftAttributes(attributes || {});
     setIsEditing(false);
   };
-
-  // useEffect(() => {
-  //   const fetchAndSetAttributes = async () => {
-  //     // Only fetch attributes if the user is authenticated.
-  //     if (authStatus === 'authenticated') {
-  //       const userAttributes = await getUserAttributes();
-  //       setAttributes(userAttributes);
-  //     }
-  //   };
-
-  //   fetchAndSetAttributes();
-  // }, [authStatus]); 
-
-  // const handleUpdatePhoto = async () => {
-  //   // Check if photo was updated in the last 3 months
-  //   const lastUpdate = new Date(user?.updatedAt || '');
-  //   const threeMonthsAgo = new Date();
-  //   threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
-
-  //   if (lastUpdate > threeMonthsAgo) {
-  //     Alert.alert(
-  //       'Photo Update Restricted',
-  //       'You can only update your photo once every 3 months for security reasons.',
-  //       [{ text: 'OK' }]
-  //     );
-  //     return;
-  //   }
-
-  //   const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-  //   if (status !== 'granted') {
-  //     Alert.alert('Permission Required', 'Please allow access to your photo library to update your profile picture.');
-  //     return;
-  //   }
-
-  //   const result = await ImagePicker.launchImageLibraryAsync({
-  //     mediaTypes: ImagePicker.MediaTypeOptions.Images,
-  //     allowsEditing: true,
-  //     aspect: [1, 1],
-  //     quality: 0.8,
-  //   });
-
-  //   if (!result.canceled && user) {
-  //     // Update user photo
-  //     setUser({
-  //       ...user,
-  //       photoUrl: result.assets[0].uri,
-  //       updatedAt: new Date().toISOString(),
-  //     });
-
-  //     Alert.alert('Photo Updated', 'Your profile photo has been updated successfully.');
-  //   }
-  // };
 
   const handleLogout = () => {
     Alert.alert(
@@ -369,23 +314,27 @@ export default function ProfileScreen() {
 
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.profileHeader}>
-          {/* <View style={styles.photoContainer}>
-            {user?.photoUrl ? (
-              <Image source={{ uri: user.photoUrl }} style={styles.photo} />
-            ) : (
+          <View style={styles.photoContainer}>
+            {imageUrl ? ( 
+              <Image
+                source={{ uri: imageUrl }}
+                style={{ width: 120, height: 120, borderRadius: 60 }}
+              />
+            ) : ( 
               <View style={styles.photoPlaceholder}>
                 <Text style={styles.photoPlaceholderText}>
                   {user?.username.charAt(0) || 'U'}
                 </Text>
               </View>
             )}
+
             <TouchableOpacity
               style={styles.cameraButton}
-              onPress={handleUpdatePhoto}
+              onPress={pickAndUploadProfilePhoto}
             >
               <Camera size={16} color={colors.background} />
             </TouchableOpacity>
-          </View> */}
+          </View>
 
           <Text style={styles.name}>{user?.username}</Text>
           <Text style={styles.userType}>

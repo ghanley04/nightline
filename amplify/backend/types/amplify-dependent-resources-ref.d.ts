@@ -7,12 +7,14 @@ export type AmplifyDependentResourcesAttributes = {
     }
   },
   "auth": {
-    "nightline23285158": {
+    "nightlinebb4e8bac": {
       "AppClientID": "string",
       "AppClientIDWeb": "string",
       "CreatedSNSRole": "string",
+      "HostedUIDomain": "string",
       "IdentityPoolId": "string",
       "IdentityPoolName": "string",
+      "OAuthMetadata": "string",
       "UserPoolArn": "string",
       "UserPoolId": "string",
       "UserPoolName": "string"
@@ -24,6 +26,12 @@ export type AmplifyDependentResourcesAttributes = {
       "LambdaExecutionRole": "string",
       "LambdaExecutionRoleArn": "string",
       "Name": "string",
+      "Region": "string"
+    }
+  },
+  "storage": {
+    "NightlineProfileImages": {
+      "BucketName": "string",
       "Region": "string"
     }
   }

@@ -41,8 +41,6 @@ export default function RootLayout() {
   const [isReady, setIsReady] = useState(false);
   const colorMode = useColorScheme();
 
-
-
   // 1. SIMPLE useEffect to handle setup and hide the splash screen
   useEffect(() => {
     async function hideSplash() {
@@ -66,9 +64,7 @@ export default function RootLayout() {
     <ThemeProvider
       colorMode={colorMode}
       theme={{
-
         tokens: {
-
           colors: {
             primary: {
               10: colors.primary,
@@ -85,9 +81,9 @@ export default function RootLayout() {
               tertiary: 'transparent',
             },
             font: {
-              primary: colors.textLight,
-              secondary: colors.textLight,
-              tertiary: colors.textLight,
+              primary: colors.placeholder,
+              secondary: colors.placeholder,
+              tertiary: colors.placeholder,
             },
           },
         },
