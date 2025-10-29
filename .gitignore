@@ -6,7 +6,7 @@ expo-env.d.ts
 
 app/aws-exports.js
 app.json
-.env*
+.env* 
 /lambdas/*/node_modules
 amplify/team-provider-info.json
 
