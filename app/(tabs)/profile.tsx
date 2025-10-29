@@ -7,10 +7,10 @@ import Card from '@/components/Card';
 import Button from '@/components/Button';
 import colors from '../../constants/colors';
 import { useAuthenticator } from '@aws-amplify/ui-react-native';
-import { signOut, fetchUserAttributes, UserAttributeKey, updateUserAttributes, confirmUserAttribute, getCurrentUser } from 'aws-amplify/auth';
+import { signOut, deleteUser, fetchUserAttributes, UserAttributeKey, updateUserAttributes, confirmUserAttribute, getCurrentUser } from 'aws-amplify/auth';
 import type { VerifiableUserAttributeKey } from "@aws-amplify/auth";
 import * as ImagePicker from 'expo-image-picker';
-import { uploadData, getUrl } from 'aws-amplify/storage';
+import { uploadData, getUrl, remove } from 'aws-amplify/storage';
 
 export async function getUserAttributes() {
   try {
@@ -229,7 +229,7 @@ export default function ProfileScreen() {
       const { url } = await getUrl({
         key: key,
         options: {
-          accessLevel: 'private', 
+          accessLevel: 'private',
           validateObjectExistence: true, // Optional: checks if the object exists before returning a URL
           expiresIn: 3600 // Optional: URL validity in seconds (default is 900 seconds)
         },
@@ -285,6 +285,33 @@ export default function ProfileScreen() {
   }>({ showModal: false, code: '' });
 
 
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete Account',
+      'Are you sure you want to permanently delete your account? This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          onPress: async () => {
+            try {
+              await remove({ key: `profile/${user.userId}.jpg`, options: { accessLevel: 'private' } });
+              await deleteUser();
+              Alert.alert('Account Deleted', 'Your account has been permanently removed.');
+              // Optionally navigate to a goodbye screen or login
+              //router.replace('/auth/signin');
+            } catch (error) {
+              console.error('❌ Error deleting user:', error);
+              Alert.alert('Error', 'There was a problem deleting your account.');
+            }
+          },
+          style: 'destructive'
+        }
+      ]
+    );
+  };
+
+
   const renderInfoField = (label: string, key: UserAttributeKey, value: string, icon: JSX.Element, type: string = 'default') => (
     <View>
       <View style={styles.infoItem}>
@@ -315,12 +342,12 @@ export default function ProfileScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.profileHeader}>
           <View style={styles.photoContainer}>
-            {imageUrl ? ( 
+            {imageUrl ? (
               <Image
                 source={{ uri: imageUrl }}
                 style={{ width: 120, height: 120, borderRadius: 60 }}
               />
-            ) : ( 
+            ) : (
               <View style={styles.photoPlaceholder}>
                 <Text style={styles.photoPlaceholderText}>
                   {user?.username.charAt(0) || 'U'}
@@ -512,6 +539,15 @@ export default function ProfileScreen() {
           variant="secondary"
           style={styles.logoutButton}
         />
+        <Button
+          title="Delete Account"
+          onPress={
+
+            handleDeleteAccount}
+          variant="secondary"
+          style={styles.logoutButton}
+        />
+
       </ScrollView >
     </View >
   );

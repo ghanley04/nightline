@@ -9,6 +9,54 @@
           ],
           "category": "function",
           "resourceName": "nightlineLane"
+        },
+        {
+          "attributes": [
+            "Name",
+            "Arn"
+          ],
+          "category": "function",
+          "resourceName": "stripeCheckout"
+        },
+        {
+          "attributes": [
+            "Name",
+            "Arn"
+          ],
+          "category": "function",
+          "resourceName": "getInviteLink"
+        },
+        {
+          "attributes": [
+            "Name",
+            "Arn"
+          ],
+          "category": "function",
+          "resourceName": "acceptInvite"
+        },
+        {
+          "attributes": [
+            "Name",
+            "Arn"
+          ],
+          "category": "function",
+          "resourceName": "addMembership"
+        },
+        {
+          "attributes": [
+            "Name",
+            "Arn"
+          ],
+          "category": "function",
+          "resourceName": "manualAddMembership"
+        },
+        {
+          "attributes": [
+            "Name",
+            "Arn"
+          ],
+          "category": "function",
+          "resourceName": "fetchPlans"
         }
       ],
       "providerPlugin": "awscloudformation",
@@ -46,13 +94,123 @@
     }
   },
   "function": {
+    "acceptInvite": {
+      "build": true,
+      "providerPlugin": "awscloudformation",
+      "service": "Lambda"
+    },
+    "addMembership": {
+      "build": true,
+      "providerPlugin": "awscloudformation",
+      "service": "Lambda"
+    },
+    "fetchPlans": {
+      "build": true,
+      "providerPlugin": "awscloudformation",
+      "service": "Lambda"
+    },
+    "getInviteLink": {
+      "build": true,
+      "providerPlugin": "awscloudformation",
+      "service": "Lambda"
+    },
+    "manualAddMembership": {
+      "build": true,
+      "providerPlugin": "awscloudformation",
+      "service": "Lambda"
+    },
     "nightlineLane": {
+      "build": true,
+      "providerPlugin": "awscloudformation",
+      "service": "Lambda"
+    },
+    "stripeCheckout": {
       "build": true,
       "providerPlugin": "awscloudformation",
       "service": "Lambda"
     }
   },
   "parameters": {
+    "AMPLIFY_function_acceptInvite_deploymentBucketName": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "acceptInvite"
+        }
+      ]
+    },
+    "AMPLIFY_function_acceptInvite_s3Key": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "acceptInvite"
+        }
+      ]
+    },
+    "AMPLIFY_function_addMembership_deploymentBucketName": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "addMembership"
+        }
+      ]
+    },
+    "AMPLIFY_function_addMembership_s3Key": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "addMembership"
+        }
+      ]
+    },
+    "AMPLIFY_function_fetchPlans_deploymentBucketName": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "fetchPlans"
+        }
+      ]
+    },
+    "AMPLIFY_function_fetchPlans_s3Key": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "fetchPlans"
+        }
+      ]
+    },
+    "AMPLIFY_function_getInviteLink_deploymentBucketName": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "getInviteLink"
+        }
+      ]
+    },
+    "AMPLIFY_function_getInviteLink_s3Key": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "getInviteLink"
+        }
+      ]
+    },
+    "AMPLIFY_function_manualAddMembership_deploymentBucketName": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "manualAddMembership"
+        }
+      ]
+    },
+    "AMPLIFY_function_manualAddMembership_s3Key": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "manualAddMembership"
+        }
+      ]
+    },
     "AMPLIFY_function_nightlineLane_deploymentBucketName": {
       "usedBy": [
         {
@@ -68,13 +226,61 @@
           "resourceName": "nightlineLane"
         }
       ]
+    },
+    "AMPLIFY_function_nightlineLane_stripeSecretKeyTest": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "nightlineLane"
+        }
+      ]
+    },
+    "AMPLIFY_function_stripeCheckout_deploymentBucketName": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "stripeCheckout"
+        }
+      ]
+    },
+    "AMPLIFY_function_stripeCheckout_s3Key": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "stripeCheckout"
+        }
+      ]
+    },
+    "AMPLIFY_function_stripeCheckout_stripePublicKeyTest": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "stripeCheckout"
+        }
+      ]
+    },
+    "AMPLIFY_function_stripeCheckout_stripeSecretKeyTest": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "stripeCheckout"
+        }
+      ]
     }
   },
   "storage": {
+    "GroupData": {
+      "providerPlugin": "awscloudformation",
+      "service": "DynamoDB"
+    },
     "NightlineProfileImages": {
       "dependsOn": [],
       "providerPlugin": "awscloudformation",
       "service": "S3"
+    },
+    "SubscriptionTable": {
+      "providerPlugin": "awscloudformation",
+      "service": "DynamoDB"
     },
     "profilePhotos": {
       "dependsOn": [],

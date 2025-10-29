@@ -13,6 +13,91 @@
           "delete"
         ]
       }
+    },
+    "/subscriptions": {
+      "name": "/subscriptions",
+      "lambdaFunction": "nightlineLane",
+      "permissions": {
+        "setting": "private",
+        "auth": [
+          "create",
+          "read",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    "/create-checkout-session": {
+      "name": "/create-checkout-session",
+      "lambdaFunction": "stripeCheckout",
+      "permissions": {
+        "setting": "private",
+        "auth": [
+          "create",
+          "read",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    "/get-invite-link": {
+      "name": "/get-invite-link",
+      "lambdaFunction": "getInviteLink",
+      "permissions": {
+        "setting": "private",
+        "auth": [
+          "create",
+          "read",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    "/accept-invite": {
+      "name": "/accept-invite",
+      "lambdaFunction": "acceptInvite",
+      "permissions": {
+        "setting": "private",
+        "auth": [
+          "create",
+          "read",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    "/add-membership": {
+      "name": "/add-membership",
+      "lambdaFunction": "addMembership",
+      "permissions": {
+        "setting": "private",
+        "auth": [
+          "create",
+          "read",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    "/manual-add-membership": {
+      "name": "/manual-add-membership",
+      "lambdaFunction": "manualAddMembership",
+      "permissions": {
+        "setting": "private",
+        "auth": [
+          "create",
+          "read",
+          "update",
+          "delete"
+        ]
+      }
+    },
+    "/get-plans": {
+      "name": "/get-plans",
+      "lambdaFunction": "fetchPlans",
+      "permissions": {
+        "setting": "open"
+      }
     }
   }
 }

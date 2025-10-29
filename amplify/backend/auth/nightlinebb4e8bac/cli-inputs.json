@@ -2,7 +2,7 @@
   "version": "1",
   "cognitoConfig": {
     "identityPoolName": "nightlinebb4e8bac_identitypool_bb4e8bac",
-    "allowUnauthenticatedIdentities": false,
+    "allowUnauthenticatedIdentities": true,
     "resourceNameTruncated": "nightlbb4e8bac",
     "userPoolName": "nightlinebb4e8bac_userpool_bb4e8bac",
     "autoVerifiedAttributes": [

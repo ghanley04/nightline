@@ -1,0 +1,14 @@
+{
+  "resourceName": "GroupData",
+  "tableName": "GroupData",
+  "partitionKey": {
+    "fieldName": "group_id",
+    "fieldType": "string"
+  },
+  "sortKey": {
+    "fieldName": "group_data_members",
+    "fieldType": "string"
+  },
+  "gsi": [],
+  "triggerFunctions": []
+}
