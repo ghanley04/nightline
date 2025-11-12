@@ -6,7 +6,7 @@ const dynamo = DynamoDBDocumentClient.from(client);
 
 exports.handler = async (event) => {
   const { userId, groupId } = JSON.parse(event.body || "{}");
-  const tableName = "GroupData";
+  const tableName = "GroupData-dev";
 
   if (!userId || !groupId)
     return { statusCode: 400, body: JSON.stringify({ error: "Missing userId or groupId" }) };

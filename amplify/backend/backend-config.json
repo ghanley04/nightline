@@ -104,6 +104,11 @@
       "providerPlugin": "awscloudformation",
       "service": "Lambda"
     },
+    "deleteMembership": {
+      "build": true,
+      "providerPlugin": "awscloudformation",
+      "service": "Lambda"
+    },
     "fetchPlans": {
       "build": true,
       "providerPlugin": "awscloudformation",
@@ -160,6 +165,22 @@
         {
           "category": "function",
           "resourceName": "addMembership"
+        }
+      ]
+    },
+    "AMPLIFY_function_deleteMembership_deploymentBucketName": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "deleteMembership"
+        }
+      ]
+    },
+    "AMPLIFY_function_deleteMembership_s3Key": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "deleteMembership"
         }
       ]
     },

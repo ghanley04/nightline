@@ -26,15 +26,15 @@ exports.handler = async (event) => {
             const random = Math.random().toString(36).substr(2, 6);
             return `${type}_${timestamp}${random}`;
         };
-        const groupId = generateGroupId(groupType); // e.g., 'greek_x123abc'
-
-        const lineItem = { price: priceId }; //creates metered if it's a one time perchase vs subscription
+        const groupId = generateGroupId(groupType); // e.g., 'greek_x123abc' 
+        const price = await stripe.prices.retrieve(priceId);
+        const lineItem = { price: priceId }; //creates metered if it's a one time perchase vs subscription 
         if (price.recurring?.usage_type !== 'metered') {
             lineItem.quantity = 1;
         }
         // 2️⃣ Create a Stripe Checkout session
         const session = await stripe.checkout.sessions.create({
-            mode: 'subscription', // or 'payment' depending on your setup
+            mode: price.recurring ? 'subscription' : 'payment',
             payment_method_types: ['card'],
             line_items: [lineItem],
             success_url: `https://yourapp.com/success?session_id={CHECKOUT_SESSION_ID}`,

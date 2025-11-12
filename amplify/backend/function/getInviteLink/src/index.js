@@ -8,7 +8,7 @@ const dynamo = DynamoDBDocumentClient.from(client);
 exports.handler = async (event) => {
   // Parse body
   const { userId, groupId } = JSON.parse(event.body || "{}");
-  const tableName = "GroupData";
+  const tableName = "GroupData-dev";
 
   if (!userId || !groupId) {
     return {

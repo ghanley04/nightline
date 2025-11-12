@@ -154,7 +154,7 @@ export default function PassScreen() {
             </Text>
             <Button
               title="Get Subscription"
-              onPress={() => router.push('/subscription/plans')}
+              onPress={() => router.push('/plans')}
               style={styles.subscribeButton}
             />
           </View>
