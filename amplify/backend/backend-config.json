@@ -109,6 +109,11 @@
       "providerPlugin": "awscloudformation",
       "service": "Lambda"
     },
+    "fetchMembership": {
+      "build": true,
+      "providerPlugin": "awscloudformation",
+      "service": "Lambda"
+    },
     "fetchPlans": {
       "build": true,
       "providerPlugin": "awscloudformation",
@@ -181,6 +186,22 @@
         {
           "category": "function",
           "resourceName": "deleteMembership"
+        }
+      ]
+    },
+    "AMPLIFY_function_fetchMembership_deploymentBucketName": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "fetchMembership"
+        }
+      ]
+    },
+    "AMPLIFY_function_fetchMembership_s3Key": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "fetchMembership"
         }
       ]
     },
@@ -298,10 +319,6 @@
       "dependsOn": [],
       "providerPlugin": "awscloudformation",
       "service": "S3"
-    },
-    "SubscriptionTable": {
-      "providerPlugin": "awscloudformation",
-      "service": "DynamoDB"
     },
     "profilePhotos": {
       "dependsOn": [],

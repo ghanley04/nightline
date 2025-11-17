@@ -58,10 +58,10 @@ exports.handler = async (event) => {
         Item: {
           group_id: { S: groupId },
           group_data_members: { S: `MEMBER#USER#${userId}` },
-          userId: { S: userId },
-          stripeCustomerId: { S: customerId },
-          groupId: { S: groupId },
-          createdAt: { S: createdAt },
+          user_id: { S: userId },
+          update_at: { S: createdAt },
+          stripe_customer_id: { S: customerId },
+          created_at: { S: createdAt },
           active: { BOOL: true },
         },
       })
@@ -75,7 +75,7 @@ exports.handler = async (event) => {
           group_id: { S: groupId },
           group_data_members: { S: "METADATA" }
         },
-        UpdateExpression: "SET memberCount = if_not_exists(memberCount, :zero) + :inc, updatedAt = :now, active = :true",
+        UpdateExpression: "SET memberCount = if_not_exists(memberCount, :zero) + :inc, updated_at = :now, active = :true",
         ExpressionAttributeValues: {
           ":inc": { N: "1" },
           ":zero": { N: "0" },
@@ -94,12 +94,11 @@ exports.handler = async (event) => {
           Item: {
             group_id: { S: groupId },
             group_data_members: { S: `INVITE#${inviteCode}` },
-            inviteCode: { S: inviteCode },
-            groupId: { S: groupId },
-            createdBy: { S: userId },
-            createdAt: { S: createdAt },
+            invite_code: { S: inviteCode },
+            created_by: { S: userId },
+            created_at: { S: createdAt },
             used: { BOOL: false },
-            inviteLink: { S: inviteLink },
+            invite_link: { S: inviteLink },
             active: { BOOL: true },
           },
         })
@@ -110,6 +109,27 @@ exports.handler = async (event) => {
     }
 
     console.log(`✅ Added ${userId} to ${groupId}`);
+
+    // 1️⃣.5️⃣ Add a token entry for this user
+    const tokenTableName = "Tokens";
+    const tokenId = crypto.randomBytes(16).toString("hex");
+
+    await dynamo.send(
+      new PutItemCommand({
+        TableName: tokenTableName,
+        Item: {
+          token_id: { S: tokenId },
+          user_id: { S: userId },
+          group_id: { S: groupId },
+          stripe_customer_id: { S: customerId },
+          created_at: { S: createdAt },
+          active: { BOOL: true },
+        },
+      })
+    );
+
+    console.log(`✅ Token created for ${userId}: ${tokenId}`);
+
 
     return { statusCode: 200, body: JSON.stringify({ success: true, inviteLink }) };
   } catch (err) {

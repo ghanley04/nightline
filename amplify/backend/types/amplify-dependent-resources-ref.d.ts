@@ -42,6 +42,13 @@ export type AmplifyDependentResourcesAttributes = {
       "Name": "string",
       "Region": "string"
     },
+    "fetchMembership": {
+      "Arn": "string",
+      "LambdaExecutionRole": "string",
+      "LambdaExecutionRoleArn": "string",
+      "Name": "string",
+      "Region": "string"
+    },
     "fetchPlans": {
       "Arn": "string",
       "LambdaExecutionRole": "string",
@@ -92,14 +99,6 @@ export type AmplifyDependentResourcesAttributes = {
     "NightlineProfileImages": {
       "BucketName": "string",
       "Region": "string"
-    },
-    "SubscriptionTable": {
-      "Arn": "string",
-      "Name": "string",
-      "PartitionKeyName": "string",
-      "PartitionKeyType": "string",
-      "Region": "string",
-      "StreamArn": "string"
     }
   }
 }

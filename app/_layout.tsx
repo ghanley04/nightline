@@ -9,8 +9,20 @@ import { Amplify } from 'aws-amplify';
 import config from '../src/aws-exports';
 import colors from '../constants/colors';
 import { LinearGradient } from "expo-linear-gradient";
+import amplifyconfig from '../src/amplifyconfiguration.json';
 
-Amplify.configure(config);
+
+Amplify.configure(amplifyconfig);
+// Amplify.configure(config, {
+//   API: {
+//     REST: {
+//       headers: async () => {
+//         return {};
+//       }
+//     }
+//   }
+// });
+//Amplify.configure(config);
 SplashScreen.preventAutoHideAsync();
 
 
@@ -143,9 +155,9 @@ export default function RootLayout() {
                       type: 'default',
                       placeholder: 'Enter your Last Name',
                       required: true,
-                    }, 
+                    },
                     {
-                    //fix the number input later
+                      //fix the number input later
                       name: 'phone_number',
                       label: 'Phone Number',
                       type: 'phone',
