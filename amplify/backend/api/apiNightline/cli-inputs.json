@@ -98,6 +98,26 @@
       "permissions": {
         "setting": "open"
       }
+    },
+    "/fetchMembership": {
+      "name": "/fetchMembership",
+      "lambdaFunction": "fetchMembership",
+      "permissions": {
+        "setting": "private",
+        "auth": [
+          "read"
+        ]
+      }
+    },
+    "/delete-membership": {
+      "name": "/delete-membership",
+      "lambdaFunction": "deleteMembership",
+      "permissions": {
+        "setting": "private",
+        "auth": [
+          "update"
+        ]
+      }
     }
   }
 }

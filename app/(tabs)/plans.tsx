@@ -5,16 +5,8 @@ import { WebView } from 'react-native-webview';
 import Button from '@/components/Button';
 import colors from '@/constants/colors';
 import { getCurrentUser, fetchUserAttributes, UserAttributeKey } from 'aws-amplify/auth';
-
-interface Plan {
-  id: string;
-  name: string;
-  description: string;
-  amount: string;
-  currency: string;
-  interval: string;
-  active: boolean;
-}
+import { get } from 'aws-amplify/api';
+import { Plan } from '../interfaces/plan'
 
 export default function SubscriptionPlansScreen() {
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -24,25 +16,51 @@ export default function SubscriptionPlansScreen() {
   const [selectedType, setSelectedType] = useState<'one-time' | 'subscription'>('subscription');
   const [isLoading, setIsLoading] = useState(false);
 
-
-
   // 🔹 Fetch Stripe plans
+  // useEffect(() => {
+  //   const fetchPlans = async () => {
+  //     try {
+  //       const res = await fetch('APIURL/fetch-plans');
+  //       const data = await res.json();
+  //       setPlans(Array.isArray(data) ? data : data.plans || []);
+  //     } catch (err) {
+  //       console.error('Error fetching plans:', err);
+  //     } finally {
+  //       setIsLoading(false);
+  //     }
+  //   };
+  //   fetchPlans();
+  // }, []);
   useEffect(() => {
     const fetchPlans = async () => {
       try {
-        const res = await fetch('https://myo31jt5y9.execute-api.us-east-2.amazonaws.com/dev/get-plans');
-        const data = await res.json();
-        setPlans(Array.isArray(data) ? data : data.plans || []);
+        const rawData = await get({
+          apiName: 'apiNightline',
+          path: '/get-plans',
+          options: {
+          },
+        });
+        const { body } = await rawData.response;
+        const data = await body.json();
+        //console.log("plan data", rawData);
+        //console.log("plan data", data);
+
+        const newdata = data as unknown as Plan[]; // adjust depending on actual structure
+        //console.log("new data", newdata);
+
+        setPlans(newdata);
       } catch (err) {
         console.error('Error fetching plans:', err);
       } finally {
         setIsLoading(false);
       }
     };
+
     fetchPlans();
   }, []);
 
-  // 🔹 Create checkout session
+
+  // Create checkout session
   async function createCheckoutSession(priceId: string, planName: string) {
     const user = await getCurrentUser();
     const userId = user.userId;
@@ -70,7 +88,7 @@ export default function SubscriptionPlansScreen() {
     setGroupId(data.groupId);
   }
 
-  // 🔹 Fetch invite link after successful payment
+  // Fetch invite link after successful payment
   const fetchInviteLink = async () => {
     if (!groupId) return;
     try {
@@ -84,7 +102,7 @@ export default function SubscriptionPlansScreen() {
     }
   };
 
-  // 🔹 Filter plans
+  //  Filter plans
   const filteredPlans = plans.filter(
     (plan) =>
       plan.active &&
@@ -115,7 +133,6 @@ export default function SubscriptionPlansScreen() {
         />
       ) : (
         <ScrollView contentContainerStyle={{ paddingBottom: 80 }}>
-          {/* 🔹 Top toggle bar INSIDE ScrollView */}
           <View style={styles.topBar}>
             <TouchableOpacity
               style={[styles.tabButton, selectedType === 'one-time' && styles.tabButtonActive]}
@@ -140,19 +157,22 @@ export default function SubscriptionPlansScreen() {
           <View style={styles.planList}>
             {filteredPlans.map((plan) => (
               <View key={plan.id} style={styles.planCard}>
-                <Text style={styles.planTitle}>{plan.name}</Text>
-                <Text>{plan.description}</Text>
-                <Text style={styles.planPrice}>
-                  {plan.amount} {plan.currency} / {plan.interval}
-                </Text>
-
-                {plan.name.toLowerCase().includes('greek') ? (
-                  <Text style={{ color: 'gray', marginTop: 8 }}>
-                    Contact your admin to subscribe to this plan
+                <View style={styles.planHeader}>
+                  <Text style={styles.planTitle}>{plan.name}</Text>
+                  <Text style={styles.planPrice}>
+                    {plan.amount} {plan.currency} / {plan.interval}
                   </Text>
-                ) : (
-                  <Button title="Subscribe" onPress={() => createCheckoutSession(plan.id, plan.name)} />
-                )}
+                </View>
+                <View style={styles.planContent}>
+                  <Text style={styles.planDescription}>{plan.description}</Text>
+                  {plan.name.toLowerCase().includes('greek') ? (
+                    <Text style={{ color: 'gray', marginTop: 8 }}>
+                      Contact your admin to subscribe to this plan
+                    </Text>
+                  ) : (
+                    <Button title="Subscribe" onPress={() => createCheckoutSession(plan.id, plan.name)} />
+                  )}
+                </View>
               </View>
             ))}
           </View>
@@ -194,22 +214,43 @@ const styles = StyleSheet.create({
   planList: {
     padding: 20,
   },
+  planContent: {
+    paddingHorizontal: 16,
+  },
+  planDescription: {
+    paddingVertical: 16,
+  },
   planCard: {
     marginBottom: 20,
-    padding: 16,
-    backgroundColor: colors.textLight,
+    paddingBottom: 16,
+    backgroundColor: colors.blacktint3,
     borderRadius: 10,
     shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
+    shadowOpacity: .1,
+    shadowRadius: 6,  
   },
   planTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 4,
+    color: colors.primary,
+
+  },
+  planHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+    backgroundColor: colors.secondary,
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 10,
+    paddingTop: 16,
+    paddingHorizontal: 16,
+    color: colors.primary,
   },
   planPrice: {
     marginVertical: 8,
     fontWeight: '500',
+    color: colors.primary,
+
   },
 });

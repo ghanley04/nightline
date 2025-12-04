@@ -1,12 +1,17 @@
-const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
-const { DynamoDBDocumentClient, GetCommand, QueryCommand } = require("@aws-sdk/lib-dynamodb");
+/* Amplify Params - DO NOT EDIT
+	API_APINIGHTLINE_APIID
+	API_APINIGHTLINE_APINAME
+	ENV
+	REGION
+Amplify Params - DO NOT EDIT */const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
+const { DynamoDBDocumentClient, QueryCommand } = require("@aws-sdk/lib-dynamodb");
 
 const client = new DynamoDBClient({});
 const dynamo = DynamoDBDocumentClient.from(client);
 
 const MEMBERS_TABLE = "GroupData-dev";
 const TOKENS_TABLE = "Tokens";
-const USER_INDEX = "user_id-index"; // GSI with userId as PK
+const USER_INDEX = "user_id-index";
 
 exports.handler = async (event) => {
   const userId = event.queryStringParameters?.userId;
@@ -15,43 +20,47 @@ exports.handler = async (event) => {
   }
 
   try {
-    // 1️⃣ Check membership
+    // 1️⃣ Check membership via GSI
     const membershipResult = await dynamo.send(
-      new GetCommand({
+      new QueryCommand({
         TableName: MEMBERS_TABLE,
-        Key: {
-          group_id: `USER#${userId}`, // adjust if your PK is groupId instead
-          group_data_members: `MEMBER#USER#${userId}`,
-        },
+        IndexName: USER_INDEX,
+        KeyConditionExpression: "user_id = :uid",
+        ExpressionAttributeValues: { ":uid": userId },
+        Limit: 1,
       })
     );
 
-    if (!membershipResult.Item) {
+    if (!membershipResult.Items || membershipResult.Items.length === 0) {
       return { statusCode: 200, body: JSON.stringify({ hasMembership: false }) };
     }
 
-    // 2️⃣ Query all tokens for this user from GSI
+    const groupId = membershipResult.Items[0].group_id;
+
+    // 2️⃣ Query all tokens for this user
     const tokenResult = await dynamo.send(
       new QueryCommand({
         TableName: TOKENS_TABLE,
         IndexName: USER_INDEX,
         KeyConditionExpression: "user_id = :uid",
         ExpressionAttributeValues: { ":uid": userId },
-        ScanIndexForward: false, // latest tokens first
+        ScanIndexForward: false,
       })
     );
 
     const tokens = tokenResult.Items || [];
 
-    const response = {
-      hasMembership: true,
-      tokenCount: tokens.length,
-      tokens,
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        hasMembership: true,
+        groupId,
+        tokenCount: tokens.length,
+        tokens,
+      }),
     };
-
-    return { statusCode: 200, body: JSON.stringify(response) };
   } catch (err) {
-    console.error("❌ Error checking membership or tokens:", err);
+    console.error("Error:", err);
     return { statusCode: 500, body: JSON.stringify({ error: "Server error" }) };
   }
 };

@@ -1,30 +1,46 @@
 import { Redirect, Stack, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
+import * as Font from 'expo-font';
 import React, { useEffect, useState } from "react";
 import { Authenticator, useAuthenticator, ThemeProvider, defaultDarkModeOverride, Theme } from '@aws-amplify/ui-react-native';
 import { useColorScheme, StyleSheet, View, ViewProps } from 'react-native';
-import { PropsWithChildren, FunctionComponent } from 'react';
-import { I18n } from '@aws-amplify/core';
-import { Amplify } from 'aws-amplify';
-import config from '../src/aws-exports';
 import colors from '../constants/colors';
 import { LinearGradient } from "expo-linear-gradient";
+import 'react-native-url-polyfill/auto';
+if (typeof URL !== 'undefined' && !URL.canParse) {
+  URL.canParse = function (url, base) {
+    try {
+      new URL(url, base);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+}
+import { Amplify } from 'aws-amplify';
+import config from '../src/aws-exports';
 import amplifyconfig from '../src/amplifyconfiguration.json';
-
+//console.log("REST APIs in config:", Amplify.getConfig().API?.REST);
 
 Amplify.configure(amplifyconfig);
-// Amplify.configure(config, {
-//   API: {
-//     REST: {
-//       headers: async () => {
-//         return {};
-//       }
-//     }
-//   }
-// });
-//Amplify.configure(config);
-SplashScreen.preventAutoHideAsync();
+// const existingConfig = Amplify.getConfig();
 
+// Amplify.configure({
+//   ...existingConfig,            // keep everything (Auth, other APIs)
+//   API: {
+//     ...existingConfig.API,      // keep existing REST/GraphQL APIs
+//     REST: {
+//       ...existingConfig.API?.REST,
+//       apiNightline: {
+//         endpoint: "APIENDPOINT/dev",
+//         region: "REGION",
+//       },
+//     },
+//   },
+// });
+
+console.log("Amplify configuration loaded:", amplifyconfig);
+SplashScreen.preventAutoHideAsync();
 
 function LayoutContent() {
   const router = useRouter();
@@ -52,6 +68,19 @@ function LayoutContent() {
 export default function RootLayout() {
   const [isReady, setIsReady] = useState(false);
   const colorMode = useColorScheme();
+  const [fontsLoaded, setFontsLoaded] = useState(false);
+
+  // useEffect(() => {
+  //   async function loadFonts() {
+  //     await Font.loadAsync({
+  //       'RethinkSans': require('../assets/fonts/RethinkSans-Regular.ttf'),
+  //       'RethinkSans-Bold': require('../assets/fonts/RethinkSans-Bold.ttf'),
+  //     });
+  //     setFontsLoaded(true);
+  //   }
+
+  //   loadFonts();
+  // }, []);
 
   // 1. SIMPLE useEffect to handle setup and hide the splash screen
   useEffect(() => {
@@ -68,7 +97,8 @@ export default function RootLayout() {
     hideSplash();
   }, []); // Run only once on component mount
 
-  if (!isReady) {
+  if (!isReady 
+  ) {
     return null; // Don't render content until app is ready
   }
 
@@ -96,6 +126,10 @@ export default function RootLayout() {
               primary: colors.placeholder,
               secondary: colors.placeholder,
               tertiary: colors.placeholder,
+
+              // primary: 'RethinkSans',
+              // secondary: 'RethinkSans',
+              // tertiary: 'RethinkSans',
             },
           },
         },

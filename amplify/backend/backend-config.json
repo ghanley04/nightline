@@ -57,6 +57,22 @@
           ],
           "category": "function",
           "resourceName": "fetchPlans"
+        },
+        {
+          "attributes": [
+            "Name",
+            "Arn"
+          ],
+          "category": "function",
+          "resourceName": "fetchMembership"
+        },
+        {
+          "attributes": [
+            "Name",
+            "Arn"
+          ],
+          "category": "function",
+          "resourceName": "deleteMembership"
         }
       ],
       "providerPlugin": "awscloudformation",
@@ -111,6 +127,7 @@
     },
     "fetchMembership": {
       "build": true,
+      "dependsOn": [],
       "providerPlugin": "awscloudformation",
       "service": "Lambda"
     },

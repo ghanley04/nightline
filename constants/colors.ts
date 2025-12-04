@@ -13,6 +13,7 @@ export const colors = {
   card: '#F9F9F9',
   border: '#EEEEEE',
   placeholder: '#BBBBBB',
+  blacktint3: '#D4D4D4',
   overlay: 'rgba(0, 0, 0, 0.5)',
   shadow: 'rgba(0, 0, 0, 0.1)',
 };

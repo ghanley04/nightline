@@ -15,6 +15,14 @@
     },
     "s3Key": {
       "Type": "String"
+    },
+    "apiapiNightlineApiName": {
+      "Type": "String",
+      "Default": "apiapiNightlineApiName"
+    },
+    "apiapiNightlineApiId": {
+      "Type": "String",
+      "Default": "apiapiNightlineApiId"
     }
   },
   "Conditions": {
@@ -69,6 +77,12 @@
             },
             "REGION": {
               "Ref": "AWS::Region"
+            },
+            "API_APINIGHTLINE_APINAME": {
+              "Ref": "apiapiNightlineApiName"
+            },
+            "API_APINIGHTLINE_APIID": {
+              "Ref": "apiapiNightlineApiId"
             }
           }
         },
@@ -160,6 +174,51 @@
                   }
                 ]
               }
+            }
+          ]
+        }
+      }
+    },
+    "AmplifyResourcesPolicy": {
+      "DependsOn": [
+        "LambdaExecutionRole"
+      ],
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyName": "amplify-lambda-execution-policy",
+        "Roles": [
+          {
+            "Ref": "LambdaExecutionRole"
+          }
+        ],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "apigateway:GET",
+                "apigateway:HEAD",
+                "apigateway:OPTIONS"
+              ],
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:aws:apigateway:",
+                      {
+                        "Ref": "AWS::Region"
+                      },
+                      "::/restapis/",
+                      {
+                        "Ref": "apiapiNightlineApiName"
+                      },
+                      "/*"
+                    ]
+                  ]
+                }
+              ]
             }
           ]
         }

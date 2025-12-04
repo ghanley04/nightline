@@ -1,19 +1,16 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, ScrollView } from 'react-native';
-import QRCode from 'react-native-qrcode-svg';
 import { StatusBar } from 'expo-status-bar';
-import { RefreshCw, UserPlus } from 'lucide-react-native';
+import { UserPlus } from 'lucide-react-native';
 import { useAuthenticator } from '@aws-amplify/ui-react-native';
 import { useSubscriptionStore } from '@/store/subscriptionStore';
 import colors from '@/constants/colors';
+import DigitalPass from '@/components/DigitalPass';
 import Button from '@/components/Button';
 import { Card } from '@/components/Card';
 import { useRouter } from 'expo-router';
 import { get } from 'aws-amplify/api';
-// import API from 'aws-amplify';
-
-
-const API_URL = 'https://myo31jt5y9.execute-api.us-east-2.amazonaws.com/dev/'; // replace with your endpoint
+import { getJwtToken } from "../auth/auth";
 
 export default function PassScreen() {
   const { user } = useAuthenticator(ctx => [ctx.user]);
@@ -21,9 +18,12 @@ export default function PassScreen() {
   const router = useRouter();
 
   // const client = generateClient();
-  const [passes, setPasses] = useState<{ id: string; tokenId: string }[]>([]);
+  const [passes, setPasses] = useState<{
+    groupId: string; id: string; tokenId: string
+  }[]>([]);
   const [qrPayloads, setQrPayloads] = useState<{ [key: string]: string }>({});
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(true);
+  const [loadingSubscription, setLoadingSubscription] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const mounted = useRef(true);
 
@@ -40,47 +40,56 @@ export default function PassScreen() {
     tokens: Token[];
     hasMembership: boolean;
     tokenId?: string;
+    groupId?: string;
   };
 
-  // ------------------------
+  type InviteResponse = {
+    inviteLink?: string;
+  };
+
   // Fetch membership tokens
-  // ------------------------
 
   const fetchMembershipTokens = useCallback(async () => {
+    const token = await getJwtToken();
+    // setIsRefreshing(true);
+
     if (!user) {
       setIsRefreshing(false);
       return;
     }
-
+    console.log("Checking User:", user);
     try {
-      setIsRefreshing(true);
       setError(null);
 
-      const restOperation = get({
-        apiName: 'apiNightline',
-        path: 'fetchMembership',
+      const response = await get({
+        apiName: "apiNightline",
+        path: "/fetchMembership",
         options: {
-          queryParams: { userId: user.userId }
-        }
+          queryParams: { userId: user.userId },
+        },
       });
-
-      const { body } = await restOperation.response;
+      const { body } = await response.response;
       const rawData = await body.json();
+
+      console.log('Lambda response:', body);
+      console.log('Lambda response - raw data:', rawData);
 
       // Cast raw JSON to MembershipResponse
       const data = rawData as unknown as MembershipResponse;
-
-      // Now cast the parsed JSON
-      // const data = jsonData as unknown as MembershipResponse;
       console.log('Fetched membership data:', data);
 
       if (!mounted.current) return;
       if (data.hasMembership && data.tokens && data.tokens.length > 0) {
-        const primaryToken = data.tokens[0];
-        setPasses([{
-          id: 'primary',
-          tokenId: primaryToken.token_id,
-        }]);
+        const formatted = data.tokens.map((t, i) => ({
+          id: `token-${i}`,
+          tokenId: t.token_id,
+          groupId: t.group_id,
+        }));
+
+        setPasses(formatted);
+        setLoadingSubscription(false);
+        //set subscription obj
+
       } else if (data.hasMembership && data.tokens && data.tokens.length === 0) {
         console.warn('Membership found but no tokens available');
         setPasses([]);
@@ -97,6 +106,7 @@ export default function PassScreen() {
     } finally {
       if (mounted.current) {
         setIsRefreshing(false);
+        setLoadingSubscription(false);
       }
     }
   }, [user]);
@@ -110,9 +120,7 @@ export default function PassScreen() {
     };
   }, [fetchMembershipTokens]);
 
-  // ------------------------
   // Rotate QR codes hourly
-  // ------------------------
   useEffect(() => {
     if (passes.length === 0) return;
 
@@ -135,20 +143,55 @@ export default function PassScreen() {
     fetchMembershipTokens().finally(() => setIsRefreshing(false));
   };
 
+
+
   const handleInviteGuest = async () => {
     try {
-      const res = await fetch(`${API_URL}/createInvite?userId=${user.userId}`);
-      const data = await res.json();
-      if (data.inviteLink) alert(`Invite your guest: ${data.inviteLink}`);
+      const response = await get({
+        apiName: "apiNightline",
+        path: "/createInvite",
+        options: {
+          queryParams: { userId: user.userId },
+        },
+      });
+
+      const { body } = await response.response;
+      const data = (await body.json()) as InviteResponse;
+
+      if (data?.inviteLink) alert(`Invite your guest: ${data.inviteLink}`);
     } catch (err) {
       console.error(err);
     }
   };
 
-  // ------------------------
+  //Get pass type to display on pass
+  const getPassType = (groupId: string) => {
+    if (!groupId) return 'Unknown';
+
+    const prefix = groupId.slice(0, 3).toLowerCase(); // first 3 letters
+
+    switch (prefix) {
+      case 'ind':
+        return 'Individual Pass';
+      case 'nig':
+        return 'Night Pass';
+      case 'gre':
+        return 'Greek Pass';
+      default:
+        return 'Unknown Pass';
+    }
+  };
+
+  if (isRefreshing || loadingSubscription) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={{ marginTop: 10 }}>Loading your pass...</Text>
+      </View>
+    );
+  }
   // Render
-  // ------------------------
-  if (!subscription) {
+  if (!subscription && passes.length === 0) {
     return (
       <View style={styles.noSubscriptionContainer}>
         <Text style={styles.noSubscriptionTitle}>No Active Subscription</Text>
@@ -164,14 +207,7 @@ export default function PassScreen() {
     );
   }
 
-  if (isRefreshing) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={{ marginTop: 10 }}>Loading your pass...</Text>
-      </View>
-    );
-  }
+
 
   if (passes.length === 0) {
     return (
@@ -193,21 +229,23 @@ export default function PassScreen() {
     <ScrollView style={styles.container} contentContainerStyle={{ padding: 20 }}>
       <StatusBar style="dark" />
 
-      {passes.map(p => (
-        <Card key={p.id} style={styles.passCard}>
-          <Text style={styles.passTitle}>Night Line Boarding Pass</Text>
-          <View style={styles.qrContainer}>
-            {qrPayloads[p.id] ? <QRCode value={qrPayloads[p.id]} size={180} /> : <ActivityIndicator size="large" />}
-          </View>
-          <Text style={styles.passUserName}>{user?.username}</Text>
-          <Text style={styles.passSubtitle}>Valid for entry & shuttle access</Text>
+      {passes.map((p, i) => {
+        const token = p.tokenId;
+        const passType = getPassType(p.groupId);
 
-          <TouchableOpacity style={styles.refreshButton} onPress={handleRefreshPass} disabled={isRefreshing}>
-            <RefreshCw size={16} color={colors.primary} style={isRefreshing ? styles.rotating : undefined} />
-            <Text style={styles.refreshText}>{isRefreshing ? 'Refreshing...' : 'Refresh Pass'}</Text>
-          </TouchableOpacity>
-        </Card>
-      ))}
+        return (
+          <DigitalPass
+            key={p.id}
+            id={p.id}
+            passType={getPassType(p.groupId)}
+            username={user.username}
+            qrPayload={qrPayloads[p.id]}
+            isRefreshing={isRefreshing}
+            onRefresh={handleRefreshPass}
+          />
+
+        );
+      })}
 
       {guestPasses.length > 0 && (
         <View style={styles.guestSection}>
@@ -241,9 +279,7 @@ export default function PassScreen() {
   );
 }
 
-// ------------------------
 // Styles
-// ------------------------
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
