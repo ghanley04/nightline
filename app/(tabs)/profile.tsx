@@ -90,7 +90,6 @@ export default function ProfileScreen() {
       const output = await updateUserAttributes({
         userAttributes: attributesToUpdate,
       });
-
       console.log("Update result:", output);
 
       // Check per-attribute update results
@@ -235,7 +234,7 @@ export default function ProfileScreen() {
         },
       });
 
-      console.log('🖼️ Fetched signed URL:', url.toString());
+      //console.log('🖼️ Fetched signed URL:', url.toString());
       setImageUrl(url.toString());
     } catch (err) {
       console.error('❌ Fetch error:', err);
@@ -320,10 +319,8 @@ export default function ProfileScreen() {
           <Text style={styles.infoLabel}>{label}</Text>
           {isEditing ? (
             <TextInput
-              // style={styles.infoInput} // You'll need to define this style
-              value={draftAttributes[key]}
+              value={draftAttributes?.[key] ?? ""}
               onChangeText={(text) => handleInputChange(key, text)}
-              // type={type}
               placeholder={value}
             />
           ) : (
@@ -512,7 +509,7 @@ export default function ProfileScreen() {
           </Card>
         </View>
 
-        <View style={styles.section}>
+        {/* <View style={styles.section}>
           <Text style={styles.sectionTitle}>Payment Methods</Text>
 
           <Card style={styles.paymentCard}>
@@ -531,7 +528,7 @@ export default function ProfileScreen() {
           <TouchableOpacity style={styles.addPaymentButton}>
             <Text style={styles.addPaymentText}>+ Add Payment Method</Text>
           </TouchableOpacity>
-        </View>
+        </View> */}
 
         <Button
           title="Log Out"

@@ -4,14 +4,24 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY_TEST);
 exports.handler = async (event) => {
     try {
         console.log('Stripe key is set?', !!process.env.STRIPE_SECRET_KEY_TEST);
-
+        console.log('📦 FULL EVENT:', JSON.stringify(event, null, 2));
+        console.log('🔵 event.body:', event.body);
+        console.log('🟣 typeof event.body:', typeof event.body);
+        console.log('🔶 event.headers:', JSON.stringify(event.headers));
+        console.log('🔷 event.requestContext:', JSON.stringify(event.requestContext));
         console.log('🔵 Raw event.body:', event.body);
         console.log('🟣 Type of event.body:', typeof event.body);
+        console.log('🟣 isBase64Encoded:', event.isBase64Encoded);
 
         let body = {};
         try {
-            body = typeof event.body === 'string' ? JSON.parse(event.body) : event.body;
-        } catch (e) {
+            if (event.isBase64Encoded) {
+                const decodedBody = Buffer.from(event.body, 'base64').toString('utf-8');
+                console.log('🔓 Decoded body:', decodedBody);
+                body = JSON.parse(decodedBody);
+            } else {
+                body = typeof event.body === 'string' ? JSON.parse(event.body) : event.body;
+            }        } catch (e) {
             console.error('❌ Failed to parse event body:', e, event.body);
         }
 
