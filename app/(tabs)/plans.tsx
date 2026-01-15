@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, ActivityIndicator } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { WebView } from 'react-native-webview';
 import Button from '@/components/Button';
@@ -8,6 +8,9 @@ import { getCurrentUser, fetchUserAttributes, UserAttributeKey } from 'aws-ampli
 import { get } from 'aws-amplify/api';
 import { Plan } from '../interfaces/plan';
 import { post } from 'aws-amplify/api';
+import { MembershipResponse, InviteResponse } from '../interfaces/interface';
+import { useAuthenticator } from '@aws-amplify/ui-react-native';
+import { getJwtToken } from "../auth/auth";
 
 export default function SubscriptionPlansScreen() {
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -16,10 +19,11 @@ export default function SubscriptionPlansScreen() {
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<'one-time' | 'subscription'>('subscription');
   const [isLoading, setIsLoading] = useState(false);
-
-  type InviteResponse = {
-    inviteLink?: string;
-  };
+  const [hasGroup, setHasGroup] = useState(false);
+  const [hasIndividual, setHasIndividual] = useState(false);
+  const [hasGreek, setHasGreek] = useState(false);
+  const [hasOther, setHasOther] = useState(false);
+  const { user } = useAuthenticator(ctx => [ctx.user]);
 
   // 🔹 Fetch Stripe plans
   // useEffect(() => {
@@ -63,6 +67,88 @@ export default function SubscriptionPlansScreen() {
 
     fetchPlans();
   }, []);
+
+
+  // Fetch membership tokens
+
+  const fetchMembershipTokens = useCallback(async () => {
+    const token = await getJwtToken();
+    // setIsRefreshing(true);
+
+    if (!user) {
+      setIsLoading(false);
+      return;
+    }
+    console.log("Checking User:", user);
+    try {
+      //setError(null);
+
+      const response = await get({
+        apiName: "apiNightline",
+        path: "/fetchMembership",
+        options: {
+          queryParams: { userId: user.userId },
+        },
+      });
+      const { body } = await response.response;
+      const rawData = await body.json();
+
+      console.log('Lambda response:', body);
+      console.log('Lambda response - raw data:', rawData);
+
+      // Cast raw JSON to MembershipResponse
+      const data = rawData as unknown as MembershipResponse;
+      console.log('Fetched membership data in plans:', data);
+
+      //if (!mounted.current) return;
+      if (data.hasMembership && data.tokens && data.tokens.length > 0) {
+        const formatted = data.tokens.map((t, i) => {
+          const groupId = t.group_id.toLowerCase();
+          if (groupId.startsWith("group")) {
+            setHasGroup(true);
+          }
+          if (groupId.startsWith("individual")) {
+            setHasIndividual(true);
+          }
+          if (groupId.startsWith("greek")) {
+            setHasGreek(true);
+          } else {
+            setHasOther(true);
+          }
+        });
+
+        //setPasses(formatted);
+        //setLoadingSubscription(false);
+        //set subscription obj
+
+      } else if (data.hasMembership && data.tokens && data.tokens.length === 0) {
+        console.warn('Membership found but no tokens available');
+        setHasGreek(false);
+        setHasGroup(false);
+        setHasIndividual(false);
+        setHasOther(false);
+        //setError('Membership active but no pass tokens found. Please contact support.');
+      } else {
+        setHasGreek(false);
+        setHasGroup(false);
+        setHasIndividual(false);
+        setHasOther(false);
+      }
+    } catch (err) {
+      console.error('Error fetching membership token:', err);
+      // if (mounted.current) {
+      //   setPasses([]);
+      //   setError('Failed to load your pass. Please try again.');
+      // }
+    } finally {
+      // if (mounted.current) {
+      //   setIsRefreshing(false);
+      //   setLoadingSubscription(false);
+      // }
+    }
+
+  }, [user]);
+    fetchMembershipTokens();
 
 
   // Create checkout session
@@ -214,30 +300,21 @@ export default function SubscriptionPlansScreen() {
     }
   };
 
-//   async function canSubscribe(userId: string, groupType: string) {
-//   // Only check duplicates for 'group' or 'greek'
-//   if (groupType !== "group" && groupType !== "greek") return true;
-
-//   const response = await get({
-//     apiName: "apiNightline",
-//     path: "/check-duplicate-subscription",
-//     options: { queryParams: { userId, groupType } },
-//   });
-
-//   const { body } = await response.response;
-//   const data = await body.json();
-
-//   return !data.isDuplicate; // true if user can subscribe
-// }
-
-
-
   //  Filter plans
   const filteredPlans = plans.filter(
     (plan) =>
       plan.active &&
       (selectedType === 'one-time' ? plan.interval === 'one-time' : plan.interval !== 'one-time')
   );
+
+  if (isLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={{ marginTop: 10 }}>Loading plans...</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -296,19 +373,40 @@ export default function SubscriptionPlansScreen() {
                 <View style={styles.planContent}>
                   <Text style={styles.planDescription}>{plan.description}</Text>
                   {plan.name.toLowerCase().includes('greek') ? (
-                    <Text style={{ color: 'gray', marginTop: 8 }}>
-                      Contact your admin to subscribe to this plan
-                    </Text>
+                    hasGreek ? (
+                      <Text style={{ color: 'gray', marginTop: 8 }}>
+                        You already have this plan.
+                      </Text>
+                    ) : (
+                      <Text style={{ color: 'gray', marginTop: 8 }}>
+                        Contact your admin to subscribe to this plan.
+                      </Text>
+                    )
                   ) : (
-                    <Button title="Subscribe" onPress={() => createCheckoutSession(plan.id, plan.name)} />
+                    plan.name.toLowerCase().includes('individual') && hasIndividual ? (
+                      <Text style={{ color: 'gray', marginTop: 8 }}>
+                        You already have an individual plan.
+                      </Text>
+                    ) : plan.name.toLowerCase().includes('group') && hasGroup ? (
+                      <Text style={{ color: 'gray', marginTop: 8 }}>
+                        You already have a group plan.
+                      </Text>
+                    ) : (
+                      <Button
+                        title="Subscribe"
+                        onPress={() => createCheckoutSession(plan.id, plan.name)}
+                      />
+                    )
                   )}
+
                 </View>
               </View>
             ))}
           </View>
         </ScrollView>
-      )}
-    </View>
+      )
+      }
+    </View >
   );
 }
 
@@ -383,4 +481,6 @@ const styles = StyleSheet.create({
     color: colors.primary,
 
   },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+
 });

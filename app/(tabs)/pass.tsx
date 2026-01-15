@@ -11,6 +11,7 @@ import { Card } from '@/components/Card';
 import { useRouter } from 'expo-router';
 import { get } from 'aws-amplify/api';
 import { getJwtToken } from "../auth/auth";
+import { MembershipResponse, InviteResponse } from '../interfaces/interface';
 
 export default function PassScreen() {
   const { user } = useAuthenticator(ctx => [ctx.user]);
@@ -26,26 +27,6 @@ export default function PassScreen() {
   const [loadingSubscription, setLoadingSubscription] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const mounted = useRef(true);
-
-  interface Token {
-    token_id: string;
-    user_id: string;
-    group_id: string;
-    // stripe_customer_id: string;
-    // created_at: string;
-    active: boolean;
-  }
-
-  type MembershipResponse = {
-    tokens: Token[];
-    hasMembership: boolean;
-    tokenId?: string;
-    groupId?: string;
-  };
-
-  type InviteResponse = {
-    inviteLink?: string;
-  };
 
   // Fetch membership tokens
 
@@ -177,6 +158,8 @@ export default function PassScreen() {
         return 'Night Pass';
       case 'gre':
         return 'Greek Pass';
+      case 'gro':
+        return 'Group Pass';
       default:
         return 'Unknown Pass';
     }
@@ -236,7 +219,7 @@ export default function PassScreen() {
         return (
           <DigitalPass
             key={p.id}
-            id={p.id}
+            id={p.id} 
             passType={getPassType(p.groupId)}
             username={user.username}
             qrPayload={qrPayloads[p.id]}

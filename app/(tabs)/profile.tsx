@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Alert, Switch, TextInput, Modal } from 'react-native';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -11,6 +11,9 @@ import { signOut, deleteUser, fetchUserAttributes, UserAttributeKey, updateUserA
 import type { VerifiableUserAttributeKey } from "@aws-amplify/auth";
 import * as ImagePicker from 'expo-image-picker';
 import { uploadData, getUrl, remove } from 'aws-amplify/storage';
+import { getJwtToken } from "../auth/auth";
+import { MembershipResponse, InviteResponse } from '../interfaces/interface';
+import { get, post } from 'aws-amplify/api';
 
 export async function getUserAttributes() {
   try {
@@ -35,15 +38,9 @@ export default function ProfileScreen() {
   const [attributes, setAttributes] = useState<Partial<Record<UserAttributeKey, string>> | null>(null);
   const firstName = attributes?.given_name || '';
   const lastName = attributes?.family_name || '';
-
-  // 1. State to track edit mode
+  const [passes, setPasses] = useState<{ groupId: string; id: string; tokenId: string }[]>([]);
   const [isEditing, setIsEditing] = useState(false);
-
-  // 2. State to hold editable values (draft)
   const [draftAttributes, setDraftAttributes] = useState<Partial<Record<UserAttributeKey, string>> | null>(null);
-
-
-  // Create the full name by joining them with a space
   const fullName = (firstName && lastName)
     ? `${firstName} ${lastName}`
     : attributes?.username;
@@ -59,7 +56,64 @@ export default function ProfileScreen() {
     };
 
     fetchAndSetAttributes();
+    fetchMembershipTokens();
+
   }, [authStatus]);
+
+  const fetchMembershipTokens = useCallback(async () => {
+    const token = await getJwtToken();
+    // setIsRefreshing(true);
+
+    console.log("Checking User:", user);
+    try {
+      //setError(null);
+
+      const response = await get({
+        apiName: "apiNightline",
+        path: "/fetchMembership",
+        options: {
+          queryParams: { userId: user.userId },
+        },
+      });
+      const { body } = await response.response;
+      const rawData = await body.json();
+
+      console.log('Lambda response:', body);
+      console.log('Lambda response - raw data:', rawData);
+
+      // Cast raw JSON to MembershipResponse
+      const data = rawData as unknown as MembershipResponse;
+      console.log('Fetched membership data in plans:', data);
+
+      //if (!mounted.current) return;
+      if (data.hasMembership && data.tokens && data.tokens.length > 0) {
+        const formatted = data.tokens.map((t, i) => ({
+          id: `token-${i}`,
+          tokenId: t.token_id,
+          groupId: t.group_id,
+        }));
+
+        setPasses(formatted);
+
+        //setPasses(formatted);
+        //setLoadingSubscription(false);
+        //set subscription obj
+
+      } else if (data.hasMembership && data.tokens && data.tokens.length === 0) {
+        console.warn('Membership found but no tokens available');
+        setPasses([]);
+        //setError('Membership active but no pass tokens found. Please contact support.');
+      } else {
+        setPasses([]);
+      }
+    } catch (err) {
+      console.error('Error fetching membership token:', err);
+      // if (mounted.current) {
+      //   setPasses([]);
+      //   setError('Failed to load your pass. Please try again.');
+      // }
+    }
+  }, [user]);
 
   // Function to handle changes in text inputs
   const handleInputChange = (key: UserAttributeKey, value: string) => {
@@ -310,7 +364,76 @@ export default function ProfileScreen() {
     );
   };
 
+  const deleteMembership = async (groupId: string) => {
+    if (!groupId) return;
 
+    Alert.alert(
+      'Delete Subscription',
+      'Are you sure you want to delete this subscription? This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const token = await getJwtToken();
+
+              const response = await post({
+                apiName: "apiNightline",
+                path: "/deleteMembership",
+                options: {
+                  body: {
+                    userId: user.userId,
+                    groupId: groupId,
+                  },
+                },
+              });
+
+              const { body } = await response.response;
+              const result = await body.json();
+
+              console.log('Delete membership response:', result);
+
+              // Refresh the membership tokens to update the UI
+              await fetchMembershipTokens();
+
+              Alert.alert(
+                'Success',
+                'Your subscription has been deleted successfully.'
+              );
+
+            } catch (error) {
+              console.error('Error deleting membership:', error);
+              Alert.alert(
+                'Error',
+                'Failed to delete subscription. Please try again.'
+              );
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const getPassType = (groupId: string) => {
+    if (!groupId) return 'Unknown';
+
+    const prefix = groupId.slice(0, 3).toLowerCase(); // first 3 letters
+
+    switch (prefix) {
+      case 'ind':
+        return 'Individual Pass';
+      case 'nig':
+        return 'Night Pass';
+      case 'gre':
+        return 'Greek Pass';
+      case 'gro':
+        return 'Group Pass';
+      default:
+        return 'Unknown Pass';
+    }
+  };
   const renderInfoField = (label: string, key: UserAttributeKey, value: string, icon: JSX.Element, type: string = 'default') => (
     <View>
       <View style={styles.infoItem}>
@@ -509,6 +632,51 @@ export default function ProfileScreen() {
           </Card>
         </View>
 
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Subscriptions</Text>
+          <Card style={styles.settingsCard}>
+
+            {passes.length === 0 ? (
+              <View style={styles.settingItem}>
+                <Text style={[styles.settingText, { color: 'gray', textAlign: 'center' }]}>
+                  You have no subscriptions
+                </Text>
+              </View>
+            ) : (
+              passes.map((p, i) => {
+                const token = p.tokenId;
+                const passType = getPassType(p.groupId);
+                const isLastPass = i === passes.length - 1;
+
+                return (
+                  <View key={token || i}>
+                    <View style={styles.settingItem}>
+                      <View style={styles.settingInfo}>
+                        <View style={styles.settingTitle}>
+                          <MapPin size={18} color={colors.primary} />
+                          <Text style={styles.settingText}>{passType}</Text>
+                        </View>
+                        <View style={styles.settingDate}>
+                          <Text style={styles.settingText}>Date: XX/XX/XX</Text>
+                        </View>
+                      </View>
+
+                      <TouchableOpacity
+                        style={styles.editButton}
+                        onPress={() => deleteMembership(p.groupId)} // Enter edit mode
+                      >
+                        <Text style={styles.modalButtonConfirmText}>Delete Subscription</Text>
+                      </TouchableOpacity>
+                    </View>
+                    {!isLastPass && <View style={styles.divider} />}
+                  </View>
+                );
+              })
+            )}
+
+          </Card>
+        </View>
+
         {/* <View style={styles.section}>
           <Text style={styles.sectionTitle}>Payment Methods</Text>
 
@@ -691,8 +859,16 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   settingInfo: {
+    flexDirection: 'column',
+    alignItems: 'center',
+  },
+  settingTitle: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  settingDate: {
+    flexDirection: 'row',
+    //alignItems: 'start',
   },
   settingText: {
     marginLeft: 12,

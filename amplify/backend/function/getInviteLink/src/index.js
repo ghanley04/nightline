@@ -1,68 +1,48 @@
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
-const { DynamoDBDocumentClient, PutCommand, UpdateCommand } = require("@aws-sdk/lib-dynamodb");
+const { DynamoDBDocumentClient, QueryCommand } = require("@aws-sdk/lib-dynamodb");
 
-// Create a DynamoDB client
 const client = new DynamoDBClient({});
 const dynamo = DynamoDBDocumentClient.from(client);
 
 exports.handler = async (event) => {
-  // Parse body
-  const { userId, groupId } = JSON.parse(event.body || "{}");
+  const { groupId } = JSON.parse(event.body || "{}");
   const tableName = "GroupData-dev";
 
-  if (!userId || !groupId) {
+  if (!groupId) {
     return {
       statusCode: 400,
-      body: JSON.stringify({ error: "Missing userId or groupId" }),
+      body: JSON.stringify({ error: "Missing groupId" }),
     };
   }
 
   try {
-    // Add user membership
-    await dynamo.send(
-      new PutCommand({
+    // Query for invite records
+    const result = await dynamo.send(
+      new QueryCommand({
         TableName: tableName,
-        Item: {
-          PK: `GROUP#${groupId}`,
-          SK: `MEMBER#USER#${userId}`,
-          userId,
-          groupId,
-          createdAt: new Date().toISOString(),
+        KeyConditionExpression: "group_id = :groupId AND begins_with(group_data_members, :invite)",
+        ExpressionAttributeValues: {
+          ":groupId": groupId,
+          ":invite": "INVITE#",
         },
       })
     );
 
-    // Increment group member count
-    await dynamo.send(
-      new UpdateCommand({
-        TableName: tableName,
-        Key: { PK: `GROUP#${groupId}`, SK: "METADATA" },
-        UpdateExpression: "ADD memberCount :inc",
-        ExpressionAttributeValues: { ":inc": 1 },
-      })
-    );
+    if (!result.Items || result.Items.length === 0) {
+      return {
+        statusCode: 404,
+        body: JSON.stringify({ error: "Invite link not found" }),
+      };
+    }
 
-    // Create invite link record
-    const inviteLink = `https://nightline.app/invite/${groupId}`;
-    await dynamo.send(
-      new PutCommand({
-        TableName: tableName,
-        Item: {
-          PK: `GROUP#${groupId}`,
-          SK: `INVITE#${groupId}`,
-          inviteLink,
-          groupId,
-          createdAt: new Date().toISOString(),
-        },
-      })
-    );
+    const inviteLink = result.Items[0].invite_link;
 
     return {
       statusCode: 200,
       body: JSON.stringify({ success: true, inviteLink }),
     };
   } catch (err) {
-    console.error("❌ Error manually adding membership:", err);
+    console.error("❌ Error fetching invite link:", err);
     return {
       statusCode: 500,
       body: JSON.stringify({ error: "Internal server error" }),
