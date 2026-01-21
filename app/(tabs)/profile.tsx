@@ -364,57 +364,105 @@ export default function ProfileScreen() {
     );
   };
 
-  const deleteMembership = async (groupId: string) => {
-    if (!groupId) return;
+  // Add this interface at the top of your file with the other interfaces
+  interface DeleteMembershipResponse {
+    success: boolean;
+    error?: string;
+    canceledSubscriptions?: string[];
+    timestamp?: string;
+  }
 
-    Alert.alert(
-      'Delete Subscription',
-      'Are you sure you want to delete this subscription? This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const token = await getJwtToken();
+ const deleteMembership = async (groupId: string) => {
+  if (!groupId) return;
 
-              const response = await post({
-                apiName: "apiNightline",
-                path: "/deleteMembership",
-                options: {
-                  body: {
-                    userId: user.userId,
-                    groupId: groupId,
-                  },
+  Alert.alert(
+    'Delete Subscription',
+    'Are you sure you want to delete this subscription? This action cannot be undone.',
+    [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            console.log('🔍 Attempting to delete membership:', {
+              userId: user.userId,
+              groupId: groupId,
+            });
+
+            const response = await post({
+              apiName: "apiNightline",
+              path: "/delete-membership",
+              options: {
+                body: {
+                  userId: user.userId,
+                  groupId: groupId, // Send it as-is (group_mj1jqbx90aodvl)
                 },
-              });
+              },
+            });
 
-              const { body } = await response.response;
-              const result = await body.json();
+            console.log('📦 Response received');
 
-              console.log('Delete membership response:', result);
+            const { body } = await response.response;
+            const rawResult = await body.json();
+            console.log('📦 Parsed result:', rawResult);
+            
+            const result = rawResult as unknown as DeleteMembershipResponse;
 
-              // Refresh the membership tokens to update the UI
-              await fetchMembershipTokens();
-
-              Alert.alert(
-                'Success',
-                'Your subscription has been deleted successfully.'
-              );
-
-            } catch (error) {
-              console.error('Error deleting membership:', error);
+            if (result.success === false) {
               Alert.alert(
                 'Error',
-                'Failed to delete subscription. Please try again.'
+                result.error || 'Failed to delete subscription. Please try again.'
               );
+              return;
             }
+
+            // Refresh the membership tokens to update the UI
+            await fetchMembershipTokens();
+
+            Alert.alert(
+              'Success',
+              'Your subscription has been deleted successfully.'
+            );
+
+          } catch (error) {
+            console.error('❌ Error deleting membership:', error);
+            
+            let errorMessage = 'Unknown error occurred';
+            
+            // Check if this is an Amplify API error with response body
+            if (typeof error === 'object' && error !== null) {
+              const err = error as any;
+              
+              // Try to extract error from the _response.body
+              if (err._response?.body) {
+                console.log('📦 Error response body:', err._response.body);
+                try {
+                  const bodyError = typeof err._response.body === 'string' 
+                    ? JSON.parse(err._response.body)
+                    : err._response.body;
+                  
+                  errorMessage = bodyError.error || bodyError.message || errorMessage;
+                } catch (parseError) {
+                  errorMessage = err._response.body;
+                }
+              } else if (err.message) {
+                errorMessage = err.message;
+              }
+            } else if (error instanceof Error) {
+              errorMessage = error.message;
+            }
+            
+            Alert.alert(
+              'Error',
+              `Failed to delete subscription: ${errorMessage}`
+            );
           }
         }
-      ]
-    );
-  };
+      }
+    ]
+  );
+};
 
   const getPassType = (groupId: string) => {
     if (!groupId) return 'Unknown';
