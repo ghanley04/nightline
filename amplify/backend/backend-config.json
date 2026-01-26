@@ -73,6 +73,14 @@
           ],
           "category": "function",
           "resourceName": "deleteMembership"
+        },
+        {
+          "attributes": [
+            "Name",
+            "Arn"
+          ],
+          "category": "function",
+          "resourceName": "deleteAccount"
         }
       ],
       "providerPlugin": "awscloudformation",
@@ -116,6 +124,11 @@
       "service": "Lambda"
     },
     "addMembership": {
+      "build": true,
+      "providerPlugin": "awscloudformation",
+      "service": "Lambda"
+    },
+    "deleteAccount": {
       "build": true,
       "providerPlugin": "awscloudformation",
       "service": "Lambda"
@@ -187,6 +200,22 @@
         {
           "category": "function",
           "resourceName": "addMembership"
+        }
+      ]
+    },
+    "AMPLIFY_function_deleteAccount_deploymentBucketName": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "deleteAccount"
+        }
+      ]
+    },
+    "AMPLIFY_function_deleteAccount_s3Key": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "deleteAccount"
         }
       ]
     },

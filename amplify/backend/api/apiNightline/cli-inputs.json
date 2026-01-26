@@ -118,6 +118,17 @@
           "update"
         ]
       }
+    },
+    "/deleteAccount": {
+      "name": "/deleteAccount",
+      "lambdaFunction": "deleteAccount",
+      "permissions": {
+        "setting": "private",
+        "auth": [
+          "update",
+          "delete"
+        ]
+      }
     }
   }
 }

@@ -87,7 +87,9 @@ export default function ProfileScreen() {
 
       //if (!mounted.current) return;
       if (data.hasMembership && data.tokens && data.tokens.length > 0) {
-        const formatted = data.tokens.map((t, i) => ({
+        const activeMemberships = data.tokens.filter(t => t.active !== false);
+
+        const formatted = activeMemberships.map((t, i) => ({
           id: `token-${i}`,
           tokenId: t.token_id,
           groupId: t.group_id,
@@ -122,6 +124,88 @@ export default function ProfileScreen() {
       [key]: value,
     }));
   };
+
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete Account',
+      'Are you sure you want to permanently delete your account? This will cancel all subscriptions and deactivate all memberships. This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          onPress: async () => {
+            try {
+              // Remove profile photo from S3
+              try {
+                await remove({
+                  key: `profile/${user.userId}.jpg`,
+                  options: { accessLevel: 'private' }
+                });
+                console.log('✅ Profile photo removed');
+              } catch (s3Error) {
+                console.warn('⚠️ Could not remove profile photo:', s3Error);
+              }
+
+              // Call backend to deactivate account and cancel subscriptions
+              const response = await post({
+                apiName: "apiNightline",
+                path: "/delete-account",
+                options: {
+                  body: {
+                    userId: user.userId,
+                    reason: 'user_requested_deletion',
+                  },
+                },
+              });
+
+              const { body } = await response.response;
+              const result = await body.json();
+
+              console.log('📦 Delete account result:', result);
+
+              if (result.success === false) {
+                Alert.alert('Error', result.error || 'Failed to delete account.');
+                return;
+              }
+
+              // Delete user from Cognito (logs them out)
+              await deleteUser();
+
+              Alert.alert('Account Deleted', 'Your account has been permanently removed.');
+
+            } catch (error) {
+              console.error('❌ Error deleting account:', error);
+
+              let errorMessage = 'Unknown error occurred';
+
+              if (typeof error === 'object' && error !== null) {
+                const err = error as any;
+
+                if (err._response?.body) {
+                  try {
+                    const bodyError = typeof err._response.body === 'string'
+                      ? JSON.parse(err._response.body)
+                      : err._response.body;
+
+                    errorMessage = bodyError.error || bodyError.message || errorMessage;
+                  } catch (e) {
+                    errorMessage = err._response.body;
+                  }
+                } else if (err.message) {
+                  errorMessage = err.message;
+                }
+              }
+
+              Alert.alert('Error', `Failed to delete account: ${errorMessage}`);
+            }
+          },
+          style: 'destructive'
+        }
+      ]
+    );
+  };
+
 
   const handleSave = async () => {
     if (!draftAttributes) return;
@@ -338,32 +422,6 @@ export default function ProfileScreen() {
   }>({ showModal: false, code: '' });
 
 
-  const handleDeleteAccount = () => {
-    Alert.alert(
-      'Delete Account',
-      'Are you sure you want to permanently delete your account? This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          onPress: async () => {
-            try {
-              await remove({ key: `profile/${user.userId}.jpg`, options: { accessLevel: 'private' } });
-              await deleteUser();
-              Alert.alert('Account Deleted', 'Your account has been permanently removed.');
-              // Optionally navigate to a goodbye screen or login
-              //router.replace('/auth/signin');
-            } catch (error) {
-              console.error('❌ Error deleting user:', error);
-              Alert.alert('Error', 'There was a problem deleting your account.');
-            }
-          },
-          style: 'destructive'
-        }
-      ]
-    );
-  };
-
   // Add this interface at the top of your file with the other interfaces
   interface DeleteMembershipResponse {
     success: boolean;
@@ -372,97 +430,97 @@ export default function ProfileScreen() {
     timestamp?: string;
   }
 
- const deleteMembership = async (groupId: string) => {
-  if (!groupId) return;
+  const deleteMembership = async (groupId: string) => {
+    if (!groupId) return;
 
-  Alert.alert(
-    'Delete Subscription',
-    'Are you sure you want to delete this subscription? This action cannot be undone.',
-    [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            console.log('🔍 Attempting to delete membership:', {
-              userId: user.userId,
-              groupId: groupId,
-            });
+    Alert.alert(
+      'Delete Subscription',
+      'Are you sure you want to delete this subscription? This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              console.log('🔍 Attempting to delete membership:', {
+                userId: user.userId,
+                groupId: groupId,
+              });
 
-            const response = await post({
-              apiName: "apiNightline",
-              path: "/delete-membership",
-              options: {
-                body: {
-                  userId: user.userId,
-                  groupId: groupId, // Send it as-is (group_mj1jqbx90aodvl)
+              const response = await post({
+                apiName: "apiNightline",
+                path: "/delete-membership",
+                options: {
+                  body: {
+                    userId: user.userId,
+                    groupId: groupId, // Send it as-is (group_mj1jqbx90aodvl)
+                  },
                 },
-              },
-            });
+              });
 
-            console.log('📦 Response received');
+              console.log('📦 Response received');
 
-            const { body } = await response.response;
-            const rawResult = await body.json();
-            console.log('📦 Parsed result:', rawResult);
-            
-            const result = rawResult as unknown as DeleteMembershipResponse;
+              const { body } = await response.response;
+              const rawResult = await body.json();
+              console.log('📦 Parsed result:', rawResult);
 
-            if (result.success === false) {
+              const result = rawResult as unknown as DeleteMembershipResponse;
+
+              if (result.success === false) {
+                Alert.alert(
+                  'Error',
+                  result.error || 'Failed to delete subscription. Please try again.'
+                );
+                return;
+              }
+
+              // Refresh the membership tokens to update the UI
+              await fetchMembershipTokens();
+
+              Alert.alert(
+                'Success',
+                'Your subscription has been deleted successfully.'
+              );
+
+            } catch (error) {
+              console.error('❌ Error deleting membership:', error);
+
+              let errorMessage = 'Unknown error occurred';
+
+              // Check if this is an Amplify API error with response body
+              if (typeof error === 'object' && error !== null) {
+                const err = error as any;
+
+                // Try to extract error from the _response.body
+                if (err._response?.body) {
+                  console.log('📦 Error response body:', err._response.body);
+                  try {
+                    const bodyError = typeof err._response.body === 'string'
+                      ? JSON.parse(err._response.body)
+                      : err._response.body;
+
+                    errorMessage = bodyError.error || bodyError.message || errorMessage;
+                  } catch (parseError) {
+                    errorMessage = err._response.body;
+                  }
+                } else if (err.message) {
+                  errorMessage = err.message;
+                }
+              } else if (error instanceof Error) {
+                errorMessage = error.message;
+              }
+
               Alert.alert(
                 'Error',
-                result.error || 'Failed to delete subscription. Please try again.'
+                `Failed to delete subscription: ${errorMessage}`
               );
-              return;
             }
-
-            // Refresh the membership tokens to update the UI
-            await fetchMembershipTokens();
-
-            Alert.alert(
-              'Success',
-              'Your subscription has been deleted successfully.'
-            );
-
-          } catch (error) {
-            console.error('❌ Error deleting membership:', error);
-            
-            let errorMessage = 'Unknown error occurred';
-            
-            // Check if this is an Amplify API error with response body
-            if (typeof error === 'object' && error !== null) {
-              const err = error as any;
-              
-              // Try to extract error from the _response.body
-              if (err._response?.body) {
-                console.log('📦 Error response body:', err._response.body);
-                try {
-                  const bodyError = typeof err._response.body === 'string' 
-                    ? JSON.parse(err._response.body)
-                    : err._response.body;
-                  
-                  errorMessage = bodyError.error || bodyError.message || errorMessage;
-                } catch (parseError) {
-                  errorMessage = err._response.body;
-                }
-              } else if (err.message) {
-                errorMessage = err.message;
-              }
-            } else if (error instanceof Error) {
-              errorMessage = error.message;
-            }
-            
-            Alert.alert(
-              'Error',
-              `Failed to delete subscription: ${errorMessage}`
-            );
           }
         }
-      }
-    ]
-  );
-};
+      ]
+    );
+  };
 
   const getPassType = (groupId: string) => {
     if (!groupId) return 'Unknown';
