@@ -745,7 +745,7 @@ export default function ProfileScreen() {
             {passes.length === 0 ? (
               <View style={styles.settingItem}>
                 <Text style={[styles.settingText, { color: 'gray', textAlign: 'center' }]}>
-                  You have no subscriptions
+                  You have no subscriptions. Go to the Plans section to get started.
                 </Text>
               </View>
             ) : (

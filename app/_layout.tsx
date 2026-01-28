@@ -3,10 +3,11 @@ import * as SplashScreen from "expo-splash-screen";
 import * as Font from 'expo-font';
 import React, { useEffect, useState } from "react";
 import { Authenticator, useAuthenticator, ThemeProvider, defaultDarkModeOverride, Theme } from '@aws-amplify/ui-react-native';
-import { useColorScheme, StyleSheet, View, ViewProps } from 'react-native';
+import { useColorScheme, StyleSheet, View, ViewProps, TextInput } from 'react-native';
 import colors from '../constants/colors';
 import { LinearGradient } from "expo-linear-gradient";
 import 'react-native-url-polyfill/auto';
+
 if (typeof URL !== 'undefined' && !URL.canParse) {
   URL.canParse = function (url, base) {
     try {
@@ -17,29 +18,14 @@ if (typeof URL !== 'undefined' && !URL.canParse) {
     }
   };
 }
+
 import { Amplify } from 'aws-amplify';
 import config from '../src/aws-exports';
 import amplifyconfig from '../src/amplifyconfiguration.json';
-//console.log("REST APIs in config:", Amplify.getConfig().API?.REST);
 
 Amplify.configure(amplifyconfig);
-// const existingConfig = Amplify.getConfig();
 
-// Amplify.configure({
-//   ...existingConfig,            // keep everything (Auth, other APIs)
-//   API: {
-//     ...existingConfig.API,      // keep existing REST/GraphQL APIs
-//     REST: {
-//       ...existingConfig.API?.REST,
-//       apiNightline: {
-//         endpoint: "APIENDPOINT/dev",
-//         region: "REGION",
-//       },
-//     },
-//   },
-// });
-
-console.log("Amplify configuration loaded:", amplifyconfig);
+// console.log("Amplify configuration loaded:", amplifyconfig);
 SplashScreen.preventAutoHideAsync();
 
 function LayoutContent() {
@@ -48,16 +34,14 @@ function LayoutContent() {
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
-    // This is where you would load fonts or other assets
-    // For now, we'll just simulate a delay and hide the splash screen
     setIsReady(true);
     SplashScreen.hideAsync();
   }, []);
 
   if (!isReady) {
-    return null; // Keep splash screen visible
+    return null;
   }
-  // If not authenticated, render the login stack
+
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Redirect href="/(tabs)" />
@@ -68,38 +52,23 @@ function LayoutContent() {
 export default function RootLayout() {
   const [isReady, setIsReady] = useState(false);
   const colorMode = useColorScheme();
-  const [fontsLoaded, setFontsLoaded] = useState(false);
 
-  // useEffect(() => {
-  //   async function loadFonts() {
-  //     await Font.loadAsync({
-  //       'RethinkSans': require('../assets/fonts/RethinkSans-Regular.ttf'),
-  //       'RethinkSans-Bold': require('../assets/fonts/RethinkSans-Bold.ttf'),
-  //     });
-  //     setFontsLoaded(true);
-  //   }
-
-  //   loadFonts();
-  // }, []);
-
-  // 1. SIMPLE useEffect to handle setup and hide the splash screen
+  
   useEffect(() => {
     async function hideSplash() {
       try {
-        await SplashScreen.hideAsync(); // This is the crucial line
+        await SplashScreen.hideAsync();
       } catch (e) {
         console.warn("Splash screen hide error:", e);
       } finally {
         setIsReady(true);
       }
     }
-    // Call the function to execute the hide logic
     hideSplash();
-  }, []); // Run only once on component mount
+  }, []);
 
-  if (!isReady 
-  ) {
-    return null; // Don't render content until app is ready
+  if (!isReady) {
+    return null;
   }
 
   return (
@@ -113,7 +82,7 @@ export default function RootLayout() {
               20: colors.primary,
               40: colors.primary,
               60: colors.primary,
-              80: colors.primary, //this one is default
+              80: colors.primary,
               90: colors.primary,
               100: colors.primary,
             },
@@ -126,28 +95,8 @@ export default function RootLayout() {
               primary: colors.placeholder,
               secondary: colors.placeholder,
               tertiary: colors.placeholder,
-
-              // primary: 'RethinkSans',
-              // secondary: 'RethinkSans',
-              // tertiary: 'RethinkSans',
             },
           },
-        },
-
-        components: {
-          button: {
-            // Set the main background color
-            // backgroundColor: {
-            //   value: '#007BFF', // 👈 Change this to your desired color (e.g., a brand blue)
-            // },
-            // // Optional: Change the color when the button is pressed/active
-            // _active: {
-            //   backgroundColor: {
-            //     value: '#0056b3', // 👈 A slightly darker color for feedback
-            //   },
-            // },
-          },
-
         },
       }}
     >
@@ -166,7 +115,7 @@ export default function RootLayout() {
                       name: 'username',
                       label: 'Username',
                       type: 'default',
-                      placeholder: 'Enter your username',
+                      placeholder: 'Choose a username',
                       required: true,
                     },
                     {
@@ -191,11 +140,10 @@ export default function RootLayout() {
                       required: true,
                     },
                     {
-                      //fix the number input later
                       name: 'phone_number',
                       label: 'Phone Number',
                       type: 'phone',
-                      placeholder: '+1 (XXX)-XXX-XXXX',
+                      placeholder: '+1 XXXXXXXXXX',
                       required: true,
                     },
                     {
@@ -214,21 +162,56 @@ export default function RootLayout() {
                     },
                   ]}
                 />
+                
               ),
             }}
-          >
-            {/* Container={(...props) => ( */}
-            {/* // reuse default `Container` and apply custom background */}
-            {/* // <Authenticator.Container */}
-            {/* //   {...props} */}
-            {/* //   style={{ backgroundColor: 'transparent' }} */}
+            // Custom validation before submitting to Cognito
+            services={{
+              async validateCustomSignUp(formData) {
+                const errors: Record<string, string> = {};
 
-            {/* // /> */}
+                //copies username to preferred_username if not set
+                if (formData.username && !formData.preferred_username) {
+                  formData.preferred_username = formData.username;
+                }
+                // Only validate phone if user has started typing in it
+                if (formData.phone_number && formData.phone_number.length > 0) {
+                  const cleaned = formData.phone_number.trim().replace(/\D/g, '');
+
+                  if (cleaned.length === 10) {
+                    // Valid - add country code
+                    formData.phone_number = `+1${cleaned}`;
+                  } else if (cleaned.length === 11 && cleaned.startsWith('1')) {
+                    // Valid - already has country code
+                    formData.phone_number = `+${cleaned}`;
+                  } else {
+                    // Only show error if they've typed enough digits to be wrong
+                    // (i.e., don't show error after typing just 1 digit)
+                    if (cleaned.length >= 10) {
+                      errors.phone_number = `Phone number must be exactly 10 digits`;
+                    }
+                    // Don't show error if they're still typing (< 10 digits)
+                  }
+                }
+
+                // Only validate password match if BOTH fields have values
+                if (formData.password && formData.confirm_password) {
+                  if (formData.password !== formData.confirm_password) {
+                    errors.confirm_password = 'Passwords do not match';
+                  }
+                }
+
+                if (Object.keys(errors).length > 0) {
+                  return errors;
+                }
+              },
+            }}
+          >
             <LayoutContent />
           </Authenticator>
         </Authenticator.Provider>
       </LinearGradient>
-    </ThemeProvider >
+    </ThemeProvider>
   );
 }
 

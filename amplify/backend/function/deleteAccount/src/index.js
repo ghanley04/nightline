@@ -1,6 +1,6 @@
 const Stripe = require('stripe');
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
-const { DynamoDBDocumentClient, UpdateCommand, QueryCommand, ScanCommand } = require('@aws-sdk/lib-dynamodb');
+const { DynamoDBDocumentClient, UpdateCommand, ScanCommand } = require('@aws-sdk/lib-dynamodb');
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY_TEST);
 const client = new DynamoDBClient({});
@@ -44,9 +44,34 @@ exports.handler = async (event) => {
     const memberships = membershipsResponse.Items || [];
     console.log(`📋 Found ${memberships.length} membership(s) for user ${userId}`);
 
+    if (memberships.length === 0) {
+      console.log('⚠️ No memberships found for user');
+      return {
+        statusCode: 200,
+        headers: { 'Access-Control-Allow-Origin': '*' },
+        body: JSON.stringify({ 
+          success: true,
+          message: 'No active memberships found to delete',
+          details: {
+            membershipsDeactivated: 0,
+            groupsAffected: 0,
+            stripeCancellations: {
+              successful: 0,
+              failed: 0,
+              subscriptions: [],
+              errors: [],
+            },
+          },
+          timestamp: deletedAt,
+        })
+      };
+    }
+
     let allCanceledSubscriptions = [];
     let allStripeErrors = [];
     let stripeCustomerIds = new Set();
+    let successfulDeactivations = 0;
+    let failedDeactivations = 0;
 
     // 2️⃣ Process each membership
     for (const membership of memberships) {
@@ -66,9 +91,11 @@ exports.handler = async (event) => {
         ? Math.floor((new Date(deletedAt) - new Date(createdAt)) / (1000 * 60 * 60 * 24))
         : null;
 
-      // 3️⃣ Cancel Stripe subscriptions for this membership
+      // 3️⃣ Cancel ALL active Stripe subscriptions for this membership
       if (stripeCustomerId) {
         try {
+          console.log(`   🔍 Checking Stripe subscriptions for customer ${stripeCustomerId}`);
+          
           const subscriptions = await stripe.subscriptions.list({
             customer: stripeCustomerId,
             status: 'active',
@@ -77,6 +104,7 @@ exports.handler = async (event) => {
 
           console.log(`   Found ${subscriptions.data.length} active subscription(s)`);
 
+          // Cancel each subscription immediately
           for (const sub of subscriptions.data) {
             try {
               const canceledSub = await stripe.subscriptions.cancel(sub.id);
@@ -91,10 +119,11 @@ exports.handler = async (event) => {
               
               console.log(`   ✅ Canceled subscription ${sub.id}`);
             } catch (cancelError) {
-              console.error(`   ❌ Failed to cancel ${sub.id}:`, cancelError.message);
+              console.error(`   ❌ Failed to cancel subscription ${sub.id}:`, cancelError.message);
               allStripeErrors.push({
                 subscriptionId: sub.id,
                 groupId: groupId,
+                customerId: stripeCustomerId,
                 error: cancelError.message,
               });
             }
@@ -107,10 +136,16 @@ exports.handler = async (event) => {
             error: stripeError.message,
           });
         }
+      } else {
+        console.log(`   ⚠️ No Stripe customer ID found for this membership`);
       }
 
-      // 4️⃣ Mark membership as inactive/deleted
+      // 4️⃣ Mark membership as inactive/deleted (matching deleteMembership pattern)
       try {
+        const canceledSubscriptionIds = allCanceledSubscriptions
+          .filter(sub => sub.groupId === groupId)
+          .map(sub => sub.subscriptionId);
+
         await dynamo.send(new UpdateCommand({
           TableName: tableName,
           Key: { 
@@ -120,29 +155,38 @@ exports.handler = async (event) => {
           UpdateExpression: `
             SET 
               active = :inactive,
+              isCancelled = :cancelled,
               accountDeleted = :deleted,
               deletedAt = :deletedAt,
+              canceledAt = :canceledAt,
               deletionReason = :reason,
               membershipDurationDays = :duration,
+              canceledSubscriptions = :subs,
               update_at = :updateAt
           `,
           ExpressionAttributeValues: {
             ':inactive': false,
+            ':cancelled': true,
             ':deleted': true,
             ':deletedAt': deletedAt,
+            ':canceledAt': deletedAt,
             ':reason': reason,
             ':duration': durationDays,
+            ':subs': canceledSubscriptionIds,
             ':updateAt': deletedAt,
           },
         }));
 
+        successfulDeactivations++;
         console.log(`   ✅ Marked membership as deleted in group ${groupId}`);
       } catch (updateError) {
+        failedDeactivations++;
         console.error(`   ❌ Failed to update membership in ${groupId}:`, updateError.message);
       }
     }
 
     // 5️⃣ Deactivate ALL invites created by this user
+    let deactivatedInvites = 0;
     try {
       const invitesResponse = await dynamo.send(new ScanCommand({
         TableName: tableName,
@@ -155,8 +199,6 @@ exports.handler = async (event) => {
 
       const invites = invitesResponse.Items || [];
       console.log(`\n📋 Found ${invites.length} invite(s) created by user`);
-
-      let deactivatedInvites = 0;
 
       for (const invite of invites) {
         try {
@@ -184,7 +226,7 @@ exports.handler = async (event) => {
       console.error('⚠️ Error processing invites:', inviteError.message);
     }
 
-    // 6️⃣ Update group metadata for each group
+    // 6️⃣ Update group metadata for each affected group
     const uniqueGroupIds = [...new Set(memberships.map(m => m.group_id))];
     
     for (const groupId of uniqueGroupIds) {
@@ -206,20 +248,25 @@ exports.handler = async (event) => {
       }
     }
 
+    // Summary
     console.log('\n✅ Account deletion complete');
-    console.log(`   - Memberships deactivated: ${memberships.length}`);
+    console.log(`   - Memberships deactivated: ${successfulDeactivations}/${memberships.length}`);
+    console.log(`   - Invites deactivated: ${deactivatedInvites}`);
     console.log(`   - Stripe subscriptions canceled: ${allCanceledSubscriptions.length}`);
     console.log(`   - Stripe errors: ${allStripeErrors.length}`);
+    console.log(`   - Unique Stripe customers: ${stripeCustomerIds.size}`);
 
     return {
       statusCode: 200,
       headers: { 'Access-Control-Allow-Origin': '*' },
       body: JSON.stringify({ 
         success: true,
-        message: 'Account successfully deactivated',
+        message: 'Account successfully deleted and all memberships deactivated',
         details: {
-          membershipsDeactivated: memberships.length,
+          membershipsDeactivated: successfulDeactivations,
+          membershipsFailed: failedDeactivations,
           groupsAffected: uniqueGroupIds.length,
+          invitesDeactivated: deactivatedInvites,
           stripeCancellations: {
             successful: allCanceledSubscriptions.length,
             failed: allStripeErrors.length,
@@ -239,7 +286,8 @@ exports.handler = async (event) => {
       headers: { 'Access-Control-Allow-Origin': '*' },
       body: JSON.stringify({ 
         success: false, 
-        error: err.message 
+        error: err.message,
+        stack: process.env.NODE_ENV === 'development' ? err.stack : undefined,
       })
     };
   }
