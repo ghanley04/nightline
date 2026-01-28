@@ -21,9 +21,10 @@ if (typeof URL !== 'undefined' && !URL.canParse) {
 
 import { Amplify } from 'aws-amplify';
 import config from '../src/aws-exports';
-import amplifyconfig from '../src/amplifyconfiguration.json';
+// import amplifyconfig from '../src/amplifyconfiguration.json';
+// Amplify.configure(amplifyconfig);
 
-Amplify.configure(amplifyconfig);
+Amplify.configure(config);
 
 // console.log("Amplify configuration loaded:", amplifyconfig);
 SplashScreen.preventAutoHideAsync();

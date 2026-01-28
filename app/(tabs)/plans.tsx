@@ -68,7 +68,7 @@ export default function SubscriptionPlansScreen() {
       return;
     }
     console.log("🎫 [FETCH_MEMBERSHIP] Checking User:", user.userId);
-    
+
     try {
       console.log('🎫 [FETCH_MEMBERSHIP] Making API call...');
       const response = await get({
@@ -78,21 +78,21 @@ export default function SubscriptionPlansScreen() {
           queryParams: { userId: user.userId },
         },
       });
-      
+
       console.log('🎫 [FETCH_MEMBERSHIP] Response received');
       const { body } = await response.response;
       const rawData = await body.json();
 
       console.log('🎫 [FETCH_MEMBERSHIP] Raw data:', rawData);
       const data = rawData as unknown as MembershipResponse;
-      
+
       if (data.hasMembership && data.tokens && data.tokens.length > 0) {
         console.log('🎫 [FETCH_MEMBERSHIP] Processing', data.tokens.length, 'tokens');
-        
+
         data.tokens.forEach((t, i) => {
           const groupId = t.group_id.toLowerCase();
           console.log(`🎫 [FETCH_MEMBERSHIP] Token ${i}: ${groupId}`);
-          
+
           if (groupId.startsWith("group")) {
             console.log('🎫 [FETCH_MEMBERSHIP] Setting hasGroup = true');
             setHasGroup(true);
@@ -115,7 +115,7 @@ export default function SubscriptionPlansScreen() {
         setHasIndividual(false);
         setHasOther(false);
       }
-      
+
       console.log('🎫 [FETCH_MEMBERSHIP] Completed successfully');
     } catch (err) {
       console.error('❌ [FETCH_MEMBERSHIP] Error:', err);
@@ -135,7 +135,7 @@ export default function SubscriptionPlansScreen() {
     console.log('💳 [CHECKOUT] priceId type:', typeof priceId);
     console.log('💳 [CHECKOUT] priceId is undefined?:', priceId === undefined);
     console.log('💳 [CHECKOUT] priceId is null?:', priceId === null);
-    
+
     try {
       console.log('💳 [CHECKOUT] Setting isLoading to true');
       setIsLoading(true);
@@ -183,7 +183,7 @@ export default function SubscriptionPlansScreen() {
       const httpResponse = await response.response;
       console.log('💳 [CHECKOUT] HTTP Response status code:', httpResponse.statusCode);
       console.log('💳 [CHECKOUT] HTTP Response headers:', httpResponse.headers);
-      
+
       console.log('💳 [CHECKOUT] Reading response body as text...');
       const text = await httpResponse.body.text();
       console.log('💳 [CHECKOUT] Response text:', text);
@@ -208,12 +208,12 @@ export default function SubscriptionPlansScreen() {
 
       console.log('💳 [CHECKOUT] URL found:', data.url);
       console.log('💳 [CHECKOUT] Group ID:', data.groupId);
-      
+
       console.log('💳 [CHECKOUT] Setting checkout URL state...');
       setCheckoutUrl(data.url);
       console.log('💳 [CHECKOUT] Setting group ID state...');
       setGroupId(data.groupId);
-      
+
       console.log('✅ [CHECKOUT] Checkout session created successfully!');
 
     } catch (error) {
@@ -223,7 +223,7 @@ export default function SubscriptionPlansScreen() {
       console.error('❌ [CHECKOUT] Error message:', err?.message);
       console.error('❌ [CHECKOUT] Full error object:', err);
       console.error('❌ [CHECKOUT] Error stack:', err?.stack);
-      
+
       // Try to extract more Amplify-specific error info
       if (err?.response) {
         console.error('❌ [CHECKOUT] Error response:', err.response);
@@ -231,7 +231,7 @@ export default function SubscriptionPlansScreen() {
       if (err?.underlyingError) {
         console.error('❌ [CHECKOUT] Underlying error:', err.underlyingError);
       }
-      
+
       Alert.alert(
         "Subscription Error",
         `Unable to start checkout process. ${err?.message || 'Unknown error'}`,
@@ -246,7 +246,7 @@ export default function SubscriptionPlansScreen() {
 
   const fetchInviteLink = async () => {
     console.log('🔗 [INVITE] Fetching invite link for groupId:', groupId);
-    
+
     if (!groupId) {
       console.log('🔗 [INVITE] No groupId, exiting');
       return;
@@ -256,7 +256,7 @@ export default function SubscriptionPlansScreen() {
       console.log('🔗 [INVITE] GroupId does not include "group" or "greek", exiting');
       return;
     }
-    
+
     try {
       console.log('🔗 [INVITE] Making API call...');
       const operation = await get({
@@ -304,32 +304,104 @@ export default function SubscriptionPlansScreen() {
       <StatusBar style="dark" />
 
       {checkoutUrl ? (
-        <WebView
-          source={{ uri: checkoutUrl }}
-          style={styles.webview}
-          originWhitelist={['*']}
-          javaScriptEnabled
-          domStorageEnabled
-          onNavigationStateChange={(navState) => {
-            console.log('🌐 [WEBVIEW] Navigation state changed:', navState.url);
-            if (navState.url.includes('success')) {
-              console.log('✅ [WEBVIEW] Payment success!');
+        <>
+          <TouchableOpacity
+            style={styles.closeButton}
+            onPress={() => {
+              console.log('🔙 [WEBVIEW] Close button pressed');
               setCheckoutUrl('');
-              fetchInviteLink();
-            } else if (navState.url.includes('cancel')) {
-              console.log('❌ [WEBVIEW] Payment canceled.');
-              setCheckoutUrl('');
-            }
-          }}
-          onError={(syntheticEvent) => {
-            const { nativeEvent } = syntheticEvent;
-            console.error('❌ [WEBVIEW] Error:', nativeEvent);
-          }}
-          onHttpError={(syntheticEvent) => {
-            const { nativeEvent } = syntheticEvent;
-            console.error('❌ [WEBVIEW] HTTP Error:', nativeEvent);
-          }}
-        />
+            }}
+          >
+            <Text style={styles.closeButtonText}>✕ Close</Text>
+          </TouchableOpacity>
+
+          <WebView
+            source={{ uri: checkoutUrl }}
+            style={styles.webview}
+            originWhitelist={['*']}
+            javaScriptEnabled={true}
+            domStorageEnabled={true}
+            thirdPartyCookiesEnabled={true}
+            sharedCookiesEnabled={true}
+            startInLoadingState={true}
+            renderLoading={() => (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color={colors.primary} />
+                <Text style={{ marginTop: 10 }}>Loading checkout...</Text>
+              </View>
+            )}
+            onLoadStart={(syntheticEvent) => {
+              const { nativeEvent } = syntheticEvent;
+              console.log('🌐 [WEBVIEW] Load started:', nativeEvent.url);
+            }}
+            onLoadEnd={(syntheticEvent) => {
+              const { nativeEvent } = syntheticEvent;
+              console.log('🌐 [WEBVIEW] Load ended:', nativeEvent.url);
+            }}
+            onNavigationStateChange={(navState) => {
+              console.log('🌐 [WEBVIEW] Navigation state changed:', navState.url);
+              console.log('🌐 [WEBVIEW] Can go back:', navState.canGoBack);
+              console.log('🌐 [WEBVIEW] Can go forward:', navState.canGoForward);
+              console.log('🌐 [WEBVIEW] Loading:', navState.loading);
+
+              if (navState.url.includes('success')) {
+                console.log('✅ [WEBVIEW] Payment success!');
+                setCheckoutUrl('');
+                fetchInviteLink();
+              } else if (navState.url.includes('cancel')) {
+                console.log('❌ [WEBVIEW] Payment canceled.');
+                setCheckoutUrl('');
+              }
+            }}
+            onError={(syntheticEvent) => {
+              const { nativeEvent } = syntheticEvent;
+              console.error('❌ [WEBVIEW] Error occurred:', nativeEvent);
+              Alert.alert(
+                'Error Loading Checkout',
+                'There was a problem loading the payment page. Please try again.',
+                [
+                  {
+                    text: 'Close',
+                    onPress: () => {
+                      setCheckoutUrl('');
+                      setIsLoading(false);
+                    }
+                  }
+                ]
+              );
+            }}
+            onHttpError={(syntheticEvent) => {
+              const { nativeEvent } = syntheticEvent;
+              console.error('❌ [WEBVIEW] HTTP Error:', nativeEvent.statusCode, nativeEvent.description);
+            }}
+            onShouldStartLoadWithRequest={(request) => {
+              console.log('🌐 [WEBVIEW] Should start load with request:', request.url);
+              return true;
+            }}
+            onContentProcessDidTerminate={(syntheticEvent) => {
+              console.error('❌ [WEBVIEW] Content process terminated!');
+              Alert.alert(
+                'Checkout Crashed',
+                'The payment page crashed. Please try again.',
+                [
+                  {
+                    text: 'Retry',
+                    onPress: () => {
+                      // Force reload by setting empty then back
+                      const url = checkoutUrl;
+                      setCheckoutUrl('');
+                      setTimeout(() => setCheckoutUrl(url), 100);
+                    }
+                  },
+                  {
+                    text: 'Close',
+                    onPress: () => setCheckoutUrl('')
+                  }
+                ]
+              );
+            }}
+          />
+        </>
       ) : (
         <ScrollView contentContainerStyle={{ paddingBottom: 80 }}>
           <View style={styles.topBar}>
@@ -487,4 +559,19 @@ const styles = StyleSheet.create({
     color: colors.primary,
   },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  closeButton: {
+    position: 'absolute',
+    top: 40,
+    right: 20,
+    zIndex: 1000,
+    backgroundColor: colors.primary,
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  closeButtonText: {
+    color: 'white',
+    fontWeight: '600',
+    fontSize: 16,
+  },
 });

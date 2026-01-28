@@ -9,7 +9,7 @@ export default {
     "icon": "./assets/images/icon.png",
     "scheme": "nightlineapp",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.anonymous.nightline-app",
