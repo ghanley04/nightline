@@ -322,6 +322,10 @@ export default function SubscriptionPlansScreen() {
             javaScriptEnabled={true}
             domStorageEnabled={true}
             thirdPartyCookiesEnabled={true}
+
+            androidHardwareAccelerationDisabled={true}  // ⭐ This often fixes Chrome crashes
+            androidLayerType="software"
+
             sharedCookiesEnabled={true}
             startInLoadingState={true}
             renderLoading={() => (
