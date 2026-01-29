@@ -1,20 +1,18 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { WebView } from 'react-native-webview';
+import * as WebBrowser from 'expo-web-browser';
 import Button from '@/components/Button';
 import colors from '@/constants/colors';
-import { getCurrentUser, fetchUserAttributes, UserAttributeKey } from 'aws-amplify/auth';
-import { get } from 'aws-amplify/api';
+import { getCurrentUser } from 'aws-amplify/auth';
+import { get, post } from 'aws-amplify/api';
 import { Plan } from '../interfaces/plan';
-import { post } from 'aws-amplify/api';
 import { MembershipResponse, InviteResponse } from '../interfaces/interface';
 import { useAuthenticator } from '@aws-amplify/ui-react-native';
 import { getJwtToken } from "../auth/auth";
 
 export default function SubscriptionPlansScreen() {
   const [plans, setPlans] = useState<Plan[]>([]);
-  const [checkoutUrl, setCheckoutUrl] = useState('');
   const [groupId, setGroupId] = useState<string | null>(null);
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<'one-time' | 'subscription'>('subscription');
@@ -32,8 +30,7 @@ export default function SubscriptionPlansScreen() {
         const rawData = await get({
           apiName: 'apiNightline',
           path: '/get-plans',
-          options: {
-          },
+          options: {},
         });
         console.log('📋 [FETCH_PLANS] Raw data received');
         const { body } = await rawData.response;
@@ -132,9 +129,6 @@ export default function SubscriptionPlansScreen() {
     console.log('💳 [CHECKOUT] ========== STARTING CHECKOUT SESSION ==========');
     console.log('💳 [CHECKOUT] priceId:', priceId);
     console.log('💳 [CHECKOUT] planName:', planName);
-    console.log('💳 [CHECKOUT] priceId type:', typeof priceId);
-    console.log('💳 [CHECKOUT] priceId is undefined?:', priceId === undefined);
-    console.log('💳 [CHECKOUT] priceId is null?:', priceId === null);
 
     try {
       console.log('💳 [CHECKOUT] Setting isLoading to true');
@@ -157,12 +151,6 @@ export default function SubscriptionPlansScreen() {
       else if (planName.toLowerCase().includes('night')) groupType = 'night';
       console.log('💳 [CHECKOUT] Group type determined:', groupType);
 
-      console.log('💳 [CHECKOUT] Preparing API request body:', {
-        priceId,
-        userId,
-        groupType,
-      });
-
       console.log('💳 [CHECKOUT] Making POST request to create-checkout-session...');
       const response = await post({
         apiName: "apiNightline",
@@ -182,12 +170,10 @@ export default function SubscriptionPlansScreen() {
       console.log('💳 [CHECKOUT] POST request completed, getting response...');
       const httpResponse = await response.response;
       console.log('💳 [CHECKOUT] HTTP Response status code:', httpResponse.statusCode);
-      console.log('💳 [CHECKOUT] HTTP Response headers:', httpResponse.headers);
 
       console.log('💳 [CHECKOUT] Reading response body as text...');
       const text = await httpResponse.body.text();
       console.log('💳 [CHECKOUT] Response text:', text);
-      console.log('💳 [CHECKOUT] Response text length:', text.length);
 
       let data;
       try {
@@ -196,7 +182,6 @@ export default function SubscriptionPlansScreen() {
         console.log('💳 [CHECKOUT] Parsed data:', data);
       } catch (parseError) {
         console.error('❌ [CHECKOUT] JSON parse error:', parseError);
-        console.error('❌ [CHECKOUT] Failed to parse text:', text);
         throw new Error("Invalid response from server");
       }
 
@@ -208,13 +193,34 @@ export default function SubscriptionPlansScreen() {
 
       console.log('💳 [CHECKOUT] URL found:', data.url);
       console.log('💳 [CHECKOUT] Group ID:', data.groupId);
-
-      console.log('💳 [CHECKOUT] Setting checkout URL state...');
-      setCheckoutUrl(data.url);
       console.log('💳 [CHECKOUT] Setting group ID state...');
       setGroupId(data.groupId);
 
-      console.log('✅ [CHECKOUT] Checkout session created successfully!');
+      console.log('🌐 [BROWSER] Opening in-app browser...');
+      // Open Stripe checkout in in-app browser
+      const result = await WebBrowser.openBrowserAsync(data.url, {
+        presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET,
+        controlsColor: colors.primary,
+        toolbarColor: colors.secondary,
+      });
+
+      console.log('🌐 [BROWSER] Browser closed with type:', result.type);
+
+      // After browser closes, refresh membership to see if payment completed
+      if (result.type === 'dismiss' || result.type === 'cancel') {
+        console.log('🌐 [BROWSER] User closed browser, refreshing membership...');
+        await fetchMembershipTokens();
+        
+        // Check if we should fetch invite link
+        if (data.groupId && 
+            (data.groupId.toLowerCase().includes("group") || 
+             data.groupId.toLowerCase().includes("greek"))) {
+          console.log('🔗 [INVITE] Fetching invite link after checkout...');
+          await fetchInviteLink(data.groupId);
+        }
+      }
+
+      console.log('✅ [CHECKOUT] Checkout session completed!');
 
     } catch (error) {
       const err = error as any;
@@ -222,20 +228,11 @@ export default function SubscriptionPlansScreen() {
       console.error('❌ [CHECKOUT] Error type:', err?.constructor?.name);
       console.error('❌ [CHECKOUT] Error message:', err?.message);
       console.error('❌ [CHECKOUT] Full error object:', err);
-      console.error('❌ [CHECKOUT] Error stack:', err?.stack);
-
-      // Try to extract more Amplify-specific error info
-      if (err?.response) {
-        console.error('❌ [CHECKOUT] Error response:', err.response);
-      }
-      if (err?.underlyingError) {
-        console.error('❌ [CHECKOUT] Underlying error:', err.underlyingError);
-      }
 
       Alert.alert(
         "Subscription Error",
         `Unable to start checkout process. ${err?.message || 'Unknown error'}`,
-        [{ text: "OK", onPress: () => console.log('💳 [CHECKOUT] Alert dismissed') }]
+        [{ text: "OK" }]
       );
     } finally {
       console.log('💳 [CHECKOUT] Setting isLoading to false');
@@ -244,15 +241,16 @@ export default function SubscriptionPlansScreen() {
     }
   }
 
-  const fetchInviteLink = async () => {
-    console.log('🔗 [INVITE] Fetching invite link for groupId:', groupId);
+  const fetchInviteLink = async (targetGroupId?: string) => {
+    const gId = targetGroupId || groupId;
+    console.log('🔗 [INVITE] Fetching invite link for groupId:', gId);
 
-    if (!groupId) {
+    if (!gId) {
       console.log('🔗 [INVITE] No groupId, exiting');
       return;
     }
 
-    if (!groupId.toLowerCase().includes("group") && !groupId.toLowerCase().includes("greek")) {
+    if (!gId.toLowerCase().includes("group") && !gId.toLowerCase().includes("greek")) {
       console.log('🔗 [INVITE] GroupId does not include "group" or "greek", exiting');
       return;
     }
@@ -263,7 +261,7 @@ export default function SubscriptionPlansScreen() {
         apiName: "apiNightline",
         path: "/get-invite-link",
         options: {
-          queryParams: { groupId },
+          queryParams: { groupId: gId },
         },
       });
 
@@ -274,6 +272,19 @@ export default function SubscriptionPlansScreen() {
       if (data.inviteLink) {
         console.log('🔗 [INVITE] Setting invite link:', data.inviteLink);
         setInviteLink(data.inviteLink);
+        
+        // Show the invite link to the user
+        Alert.alert(
+          "Group Created!",
+          `Share this link with your group members:\n\n${data.inviteLink}`,
+          [
+            { text: "Copy Link", onPress: () => {
+              // You can add clipboard functionality here if needed
+              console.log('📋 [INVITE] Link copied');
+            }},
+            { text: "OK" }
+          ]
+        );
       }
     } catch (e) {
       console.error('❌ [INVITE] Error fetching invite link:', e);
@@ -288,13 +299,12 @@ export default function SubscriptionPlansScreen() {
 
   console.log('🎨 [RENDER] Rendering with isLoading:', isLoading);
   console.log('🎨 [RENDER] Filtered plans count:', filteredPlans.length);
-  console.log('🎨 [RENDER] Has checkoutUrl?:', !!checkoutUrl);
 
-  if (isLoading) {
+  if (isLoading && plans.length === 0) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={{ marginTop: 10 }}>Loading plans...</Text>
+        <Text style={{ marginTop: 10, color: colors.text }}>Loading plans...</Text>
       </View>
     );
   }
@@ -303,202 +313,93 @@ export default function SubscriptionPlansScreen() {
     <View style={styles.container}>
       <StatusBar style="dark" />
 
-      {checkoutUrl ? (
-        <>
+      <ScrollView contentContainerStyle={{ paddingBottom: 80 }}>
+        <View style={styles.topBar}>
           <TouchableOpacity
-            style={styles.closeButton}
+            style={[styles.tabButton, selectedType === 'one-time' && styles.tabButtonActive]}
             onPress={() => {
-              console.log('🔙 [WEBVIEW] Close button pressed');
-              setCheckoutUrl('');
+              console.log('🔘 [TAB] Switching to one-time');
+              setSelectedType('one-time');
             }}
           >
-            <Text style={styles.closeButtonText}>✕ Close</Text>
+            <Text style={selectedType === 'one-time' ? styles.tabTextActive : styles.tabText}>
+              One-Time
+            </Text>
           </TouchableOpacity>
 
-          <WebView
-            source={{ uri: checkoutUrl }}
-            style={styles.webview}
-            originWhitelist={['*']}
-            javaScriptEnabled={true}
-            domStorageEnabled={true}
-            thirdPartyCookiesEnabled={true}
+          <TouchableOpacity
+            style={[styles.tabButton, selectedType === 'subscription' && styles.tabButtonActive]}
+            onPress={() => {
+              console.log('🔘 [TAB] Switching to subscription');
+              setSelectedType('subscription');
+            }}
+          >
+            <Text style={selectedType === 'subscription' ? styles.tabTextActive : styles.tabText}>
+              Subscription
+            </Text>
+          </TouchableOpacity>
+        </View>
 
-            androidHardwareAccelerationDisabled={true}  // ⭐ This often fixes Chrome crashes
-            androidLayerType="software"
-
-            sharedCookiesEnabled={true}
-            startInLoadingState={true}
-            renderLoading={() => (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color={colors.primary} />
-                <Text style={{ marginTop: 10 }}>Loading checkout...</Text>
-              </View>
-            )}
-            onLoadStart={(syntheticEvent) => {
-              const { nativeEvent } = syntheticEvent;
-              console.log('🌐 [WEBVIEW] Load started:', nativeEvent.url);
-            }}
-            onLoadEnd={(syntheticEvent) => {
-              const { nativeEvent } = syntheticEvent;
-              console.log('🌐 [WEBVIEW] Load ended:', nativeEvent.url);
-            }}
-            onNavigationStateChange={(navState) => {
-              console.log('🌐 [WEBVIEW] Navigation state changed:', navState.url);
-              console.log('🌐 [WEBVIEW] Can go back:', navState.canGoBack);
-              console.log('🌐 [WEBVIEW] Can go forward:', navState.canGoForward);
-              console.log('🌐 [WEBVIEW] Loading:', navState.loading);
-
-              if (navState.url.includes('success')) {
-                console.log('✅ [WEBVIEW] Payment success!');
-                setCheckoutUrl('');
-                fetchInviteLink();
-              } else if (navState.url.includes('cancel')) {
-                console.log('❌ [WEBVIEW] Payment canceled.');
-                setCheckoutUrl('');
-              }
-            }}
-            onError={(syntheticEvent) => {
-              const { nativeEvent } = syntheticEvent;
-              console.error('❌ [WEBVIEW] Error occurred:', nativeEvent);
-              Alert.alert(
-                'Error Loading Checkout',
-                'There was a problem loading the payment page. Please try again.',
-                [
-                  {
-                    text: 'Close',
-                    onPress: () => {
-                      setCheckoutUrl('');
-                      setIsLoading(false);
-                    }
-                  }
-                ]
-              );
-            }}
-            onHttpError={(syntheticEvent) => {
-              const { nativeEvent } = syntheticEvent;
-              console.error('❌ [WEBVIEW] HTTP Error:', nativeEvent.statusCode, nativeEvent.description);
-            }}
-            onShouldStartLoadWithRequest={(request) => {
-              console.log('🌐 [WEBVIEW] Should start load with request:', request.url);
-              return true;
-            }}
-            onContentProcessDidTerminate={(syntheticEvent) => {
-              console.error('❌ [WEBVIEW] Content process terminated!');
-              Alert.alert(
-                'Checkout Crashed',
-                'The payment page crashed. Please try again.',
-                [
-                  {
-                    text: 'Retry',
-                    onPress: () => {
-                      // Force reload by setting empty then back
-                      const url = checkoutUrl;
-                      setCheckoutUrl('');
-                      setTimeout(() => setCheckoutUrl(url), 100);
-                    }
-                  },
-                  {
-                    text: 'Close',
-                    onPress: () => setCheckoutUrl('')
-                  }
-                ]
-              );
-            }}
-          />
-        </>
-      ) : (
-        <ScrollView contentContainerStyle={{ paddingBottom: 80 }}>
-          <View style={styles.topBar}>
-            <TouchableOpacity
-              style={[styles.tabButton, selectedType === 'one-time' && styles.tabButtonActive]}
-              onPress={() => {
-                console.log('🔘 [TAB] Switching to one-time');
-                setSelectedType('one-time');
-              }}
-            >
-              <Text style={selectedType === 'one-time' ? styles.tabTextActive : styles.tabText}>
-                One-Time
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.tabButton, selectedType === 'subscription' && styles.tabButtonActive]}
-              onPress={() => {
-                console.log('🔘 [TAB] Switching to subscription');
-                setSelectedType('subscription');
-              }}
-            >
-              <Text style={selectedType === 'subscription' ? styles.tabTextActive : styles.tabText}>
-                Subscription
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.planList}>
-            {filteredPlans.map((plan, index) => {
-              console.log(`📦 [PLAN_${index}] Rendering plan:`, plan.name, 'ID:', plan.id);
-              return (
-                <View key={plan.id} style={styles.planCard}>
-                  <View style={styles.planHeader}>
-                    <Text style={styles.planTitle}>{plan.name}</Text>
-                    <Text style={styles.planPrice}>
-                      {plan.amount} {plan.currency} / {plan.interval}
-                    </Text>
-                  </View>
-                  <View style={styles.planContent}>
-                    <Text style={styles.planDescription}>{plan.description}</Text>
-                    {plan.name.toLowerCase().includes('greek') ? (
-                      hasGreek ? (
-                        <Text style={{ color: 'gray', marginTop: 8 }}>
-                          You already have this plan.
-                        </Text>
-                      ) : (
-                        <Text style={{ color: 'gray', marginTop: 8 }}>
-                          Contact your admin to subscribe to this plan.
-                        </Text>
-                      )
-                    ) : (
-                      plan.name.toLowerCase().includes('individual') && hasIndividual ? (
-                        <Text style={{ color: 'gray', marginTop: 8 }}>
-                          You already have an individual plan.
-                        </Text>
-                      ) : plan.name.toLowerCase().includes('group') && hasGroup ? (
-                        <Text style={{ color: 'gray', marginTop: 8 }}>
-                          You already have a group plan.
-                        </Text>
-                      ) : (
-                        <Button
-                          title={isLoading ? "Loading..." : "Subscribe"}
-                          onPress={() => {
-                            console.log(`🔘 [BUTTON] Subscribe button pressed for plan:`, plan.name);
-                            console.log(`🔘 [BUTTON] Plan ID being passed:`, plan.id);
-                            if (!isLoading) {
-                              createCheckoutSession(plan.id, plan.name);
-                            } else {
-                              console.log(`🔘 [BUTTON] Button press ignored - already loading`);
-                            }
-                          }}
-                          disabled={isLoading}
-                        />
-                      )
-                    )}
-                  </View>
+        <View style={styles.planList}>
+          {filteredPlans.map((plan, index) => {
+            console.log(`📦 [PLAN_${index}] Rendering plan:`, plan.name, 'ID:', plan.id);
+            return (
+              <View key={plan.id} style={styles.planCard}>
+                <View style={styles.planHeader}>
+                  <Text style={styles.planTitle}>{plan.name}</Text>
+                  <Text style={styles.planPrice}>
+                    {plan.amount} {plan.currency} / {plan.interval}
+                  </Text>
                 </View>
-              );
-            })}
-          </View>
-        </ScrollView>
-      )}
+                <View style={styles.planContent}>
+                  <Text style={styles.planDescription}>{plan.description}</Text>
+                  {plan.name.toLowerCase().includes('greek') ? (
+                    hasGreek ? (
+                      <Text style={{ color: 'gray', marginTop: 8 }}>
+                        You already have this plan.
+                      </Text>
+                    ) : (
+                      <Text style={{ color: 'gray', marginTop: 8 }}>
+                        Contact your admin to subscribe to this plan.
+                      </Text>
+                    )
+                  ) : (
+                    plan.name.toLowerCase().includes('individual') && hasIndividual ? (
+                      <Text style={{ color: 'gray', marginTop: 8 }}>
+                        You already have an individual plan.
+                      </Text>
+                    ) : plan.name.toLowerCase().includes('group') && hasGroup ? (
+                      <Text style={{ color: 'gray', marginTop: 8 }}>
+                        You already have a group plan.
+                      </Text>
+                    ) : (
+                      <Button
+                        title={isLoading ? "Loading..." : "Subscribe"}
+                        onPress={() => {
+                          console.log(`🔘 [BUTTON] Subscribe button pressed for plan:`, plan.name);
+                          console.log(`🔘 [BUTTON] Plan ID being passed:`, plan.id);
+                          if (!isLoading) {
+                            createCheckoutSession(plan.id, plan.name);
+                          } else {
+                            console.log(`🔘 [BUTTON] Button press ignored - already loading`);
+                          }
+                        }}
+                        disabled={isLoading}
+                      />
+                    )
+                  )}
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  webview: {
-    flex: 1,
-    width: Dimensions.get('window').width,
-  },
   topBar: {
     flexDirection: 'row',
     justifyContent: 'space-around',
@@ -530,6 +431,7 @@ const styles = StyleSheet.create({
   },
   planDescription: {
     paddingVertical: 16,
+    color: colors.text,
   },
   planCard: {
     marginBottom: 20,
@@ -562,20 +464,10 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: colors.primary,
   },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  closeButton: {
-    position: 'absolute',
-    top: 40,
-    right: 20,
-    zIndex: 1000,
-    backgroundColor: colors.primary,
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  closeButtonText: {
-    color: 'white',
-    fontWeight: '600',
-    fontSize: 16,
+  loadingContainer: { 
+    flex: 1, 
+    justifyContent: 'center', 
+    alignItems: 'center',
+    backgroundColor: colors.background,
   },
 });

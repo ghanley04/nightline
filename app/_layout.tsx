@@ -39,14 +39,19 @@ function LayoutContent() {
     SplashScreen.hideAsync();
   }, []);
 
+  useEffect(() => {
+    // Redirect after component mounts
+    if (isReady) {
+      router.replace('/(tabs)');
+    }
+  }, [isReady]);
+
   if (!isReady) {
     return null;
   }
 
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Redirect href="/(tabs)" />
-    </Stack>
+    <Stack screenOptions={{ headerShown: false }} />
   );
 }
 
