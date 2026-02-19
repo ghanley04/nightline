@@ -1,114 +1,141 @@
-const Stripe = require('stripe');
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
 const { DynamoDBDocumentClient, PutCommand, UpdateCommand, GetCommand } = require('@aws-sdk/lib-dynamodb');
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY_TEST);
 const client = new DynamoDBClient({});
 const dynamo = DynamoDBDocumentClient.from(client);
 
+/**
+ * acceptInvite Lambda Function
+ * Handles users accepting group invites and adds their info to DynamoDB
+ * This is called when a user clicks an invite link and is authenticated
+ */
 exports.handler = async (event) => {
-  const sig = event.headers?.['stripe-signature'];
-
-  let stripeEvent;
+  // Parse request body
+  let body;
   try {
-    // 1️⃣ Verify webhook signature
-    stripeEvent = stripe.webhooks.constructEvent(
-      event.body,
-      sig,
-      process.env.STRIPE_WEBHOOK_SECRET
-    );
+    body = JSON.parse(event.body);
   } catch (err) {
-    console.error('⚠️ Webhook signature verification failed:', err.message);
     return {
       statusCode: 400,
-      body: JSON.stringify({ error: 'Invalid signature' }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
+      body: JSON.stringify({ error: 'Invalid request body' }),
     };
   }
 
-  // 2️⃣ Handle checkout.session.completed events
-  if (stripeEvent.type === 'checkout.session.completed') {
-    const session = stripeEvent.data.object;
+  const { groupId, userId, userName, email, phoneNumber } = body;
 
-    const userId = session.metadata?.userId;
-    const groupId = session.metadata?.groupId;
-
-    if (!userId || !groupId) {
-      console.error('❌ Missing userId or groupId in metadata');
-      return {
-        statusCode: 400,
-        body: JSON.stringify({ error: 'Missing metadata' }),
-      };
-    }
-
-    try {
-      const tableName = 'GroupsData';
-
-      // 3️⃣ Add user membership
-      await dynamo.send(new PutCommand({
-        TableName: tableName,
-        Item: {
-          PK: `GROUP#${groupId}`,
-          SK: `MEMBER#USER#${userId}`,
-          userId,
-          groupId,
-          createdAt: new Date().toISOString(),
-        },
-      }));
-
-      // 4️⃣ Increment member count
-      await dynamo.send(new UpdateCommand({
-        TableName: tableName,
-        Key: { PK: `GROUP#${groupId}`, SK: 'METADATA' },
-        UpdateExpression: 'ADD memberCount :inc',
-        ExpressionAttributeValues: { ':inc': 1 },
-      }));
-
-      // 5️⃣ Ensure invite link exists
-      const inviteLink = `https://nightline.app/invite/${groupId}`;
-
-      const existingInvite = await dynamo.send(new GetCommand({
-        TableName: tableName,
-        Key: { PK: `GROUP#${groupId}`, SK: `INVITE#${groupId}` },
-      }));
-
-      if (!existingInvite.Item) {
-        await dynamo.send(new PutCommand({
-          TableName: tableName,
-          Item: {
-            PK: `GROUP#${groupId}`,
-            SK: `INVITE#${groupId}`,
-            inviteCode: groupId,
-            inviteLink,
-            groupId,
-            createdAt: new Date().toISOString(),
-          },
-        }));
-        console.log(`🔗 Created group invite link: ${inviteLink}`);
-      } else {
-        console.log(`ℹ️ Invite link already exists: ${inviteLink}`);
-      }
-
-      console.log(`✅ Added ${userId} as member of ${groupId}`);
-      return {
-        statusCode: 200,
-        body: JSON.stringify({
-          success: true,
-          message: `User ${userId} added to group ${groupId}`,
-          inviteLink,
-        }),
-      };
-    } catch (err) {
-      console.error('❌ DynamoDB error:', err);
-      return {
-        statusCode: 500,
-        body: JSON.stringify({ error: 'Error adding membership' }),
-      };
-    }
+  // Validate inputs
+  if (!groupId || !userId) {
+    return {
+      statusCode: 400,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
+      body: JSON.stringify({ error: 'Missing groupId or userId' }),
+    };
   }
 
-  // 6️⃣ Ignore other events
-  return {
-    statusCode: 200,
-    body: JSON.stringify({ received: true }),
-  };
+  // TODO: Verify JWT token from Authorization header to ensure userId matches authenticated user
+  // const token = event.headers.Authorization?.replace('Bearer ', '');
+
+  const tableName = 'GroupsData';
+
+  try {
+    // 1️⃣ Check if group exists and get group details
+    const groupMetadata = await dynamo.send(new GetCommand({
+      TableName: tableName,
+      Key: { PK: `GROUP#${groupId}`, SK: 'METADATA' },
+    }));
+
+    if (!groupMetadata.Item) {
+      return {
+        statusCode: 404,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+        body: JSON.stringify({ error: 'Group not found' }),
+      };
+    }
+
+    // 2️⃣ Check if user is already a member
+    const existingMembership = await dynamo.send(new GetCommand({
+      TableName: tableName,
+      Key: {
+        PK: `GROUP#${groupId}`,
+        SK: `MEMBER#USER#${userId}`,
+      },
+    }));
+
+    if (existingMembership.Item) {
+      return {
+        statusCode: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+        body: JSON.stringify({
+          success: true,
+          message: 'User is already a member of this group',
+          alreadyMember: true,
+          groupId,
+        }),
+      };
+    }
+
+    // 3️⃣ Add user as a member with their complete info
+    await dynamo.send(new PutCommand({
+      TableName: tableName,
+      Item: {
+        PK: `GROUP#${groupId}`,
+        SK: `MEMBER#USER#${userId}`,
+        userId,
+        groupId,
+        userName: userName || 'Unknown User',
+        email: email || null,
+        phoneNumber: phoneNumber || null,
+        joinedAt: new Date().toISOString(),
+        membershipType: 'free', // vs 'paid' from Stripe webhook
+        status: 'active',
+      },
+    }));
+
+    // 4️⃣ Increment member count
+    await dynamo.send(new UpdateCommand({
+      TableName: tableName,
+      Key: { PK: `GROUP#${groupId}`, SK: 'METADATA' },
+      UpdateExpression: 'ADD memberCount :inc',
+      ExpressionAttributeValues: { ':inc': 1 },
+    }));
+
+    console.log(`✅ User ${userId} successfully joined group ${groupId}`);
+
+    return {
+      statusCode: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
+      body: JSON.stringify({
+        success: true,
+        message: `Successfully joined ${groupMetadata.Item.groupName || 'the group'}`,
+        groupId,
+        userId,
+      }),
+    };
+  } catch (err) {
+    console.error('❌ Error joining group:', err);
+    return {
+      statusCode: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
+      body: JSON.stringify({ error: 'Failed to join group' }),
+    };
+  }
 };

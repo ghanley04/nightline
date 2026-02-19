@@ -7,6 +7,9 @@ import { useColorScheme, StyleSheet, View, ViewProps, TextInput } from 'react-na
 import colors from '../constants/colors';
 import { LinearGradient } from "expo-linear-gradient";
 import 'react-native-url-polyfill/auto';
+import { getCurrentUser, fetchAuthSession } from 'aws-amplify/auth';
+import AppLinkHandler from '@/components/AppLinkHandler';
+
 
 if (typeof URL !== 'undefined' && !URL.canParse) {
   URL.canParse = function (url, base) {
@@ -33,6 +36,43 @@ function LayoutContent() {
   const router = useRouter();
   const { authStatus } = useAuthenticator(context => [context.authStatus]);
   const [isReady, setIsReady] = useState(false);
+  const [role, setRole] = useState<'admin' | 'driver' | 'user' | null>(null);
+  const [groups, setGroups] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadGroups() {
+      try {
+        const session = await fetchAuthSession({ bypassCache: true });
+        const idToken = session.tokens?.idToken;
+        if (!idToken) throw new Error('No ID token');
+
+        const payload = idToken.payload as any;
+        const userGroups = payload['cognito:groups'] || [];
+        console.log("Groups from token:", userGroups);
+
+
+        setGroups(userGroups);
+      } catch (err) {
+        console.error('Error loading groups:', err);
+        setGroups([]);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadGroups();
+  }, []);
+
+  const isAdmin = groups.includes('Admin');
+  const isBusDriver = groups.includes('BusDrivers');
+
+  useEffect(() => {
+    if (!loading) {
+      console.log("isAdmin:", isAdmin);
+      console.log("isBusDriver:", isBusDriver);
+    }
+  }, [loading, isAdmin, isBusDriver]);
 
   useEffect(() => {
     setIsReady(true);
@@ -40,11 +80,17 @@ function LayoutContent() {
   }, []);
 
   useEffect(() => {
-    // Redirect after component mounts
-    if (isReady) {
-      router.replace('/(tabs)');
+    // 🔥 Wait for both ready AND groups loaded before routing
+    if (isReady && !loading) {
+      if (isAdmin) {
+        router.replace('/(adminTabs)');
+      } else if (isBusDriver) {
+        router.replace('/(busTabs)');
+      } else {
+        router.replace('/(tabs)');
+      }
     }
-  }, [isReady]);
+  }, [isReady, loading, isAdmin, isBusDriver]);
 
   if (!isReady) {
     return null;
@@ -55,11 +101,33 @@ function LayoutContent() {
   );
 }
 
+export function formatPhoneToE164(phone: string): string {
+  if (!phone) {
+    throw new Error("Phone number is required");
+  }
+
+  // Remove everything except digits
+  const digits = phone.replace(/\D/g, "");
+
+  // 10-digit US number
+  if (digits.length === 10) {
+    return `+1${digits}`;
+  }
+
+  // 11-digit starting with 1
+  if (digits.length === 11 && digits.startsWith("1")) {
+    return `+${digits}`;
+  }
+
+  throw new Error("Phone number must be 10 digits (US)");
+}
+
+
 export default function RootLayout() {
   const [isReady, setIsReady] = useState(false);
   const colorMode = useColorScheme();
 
-  
+
   useEffect(() => {
     async function hideSplash() {
       try {
@@ -110,6 +178,8 @@ export default function RootLayout() {
         colors={[colors.secondary, '#222222']}
         style={styles.container}
       >
+        <AppLinkHandler />
+
         <Authenticator.Provider>
           <Authenticator
             components={{
@@ -148,7 +218,7 @@ export default function RootLayout() {
                     {
                       name: 'phone_number',
                       label: 'Phone Number',
-                      type: 'phone',
+                      type: 'default',
                       placeholder: '+1 XXXXXXXXXX',
                       required: true,
                     },
@@ -168,50 +238,45 @@ export default function RootLayout() {
                     },
                   ]}
                 />
-                
+
               ),
             }}
             // Custom validation before submitting to Cognito
             services={{
               async validateCustomSignUp(formData) {
                 const errors: Record<string, string> = {};
-
-                //copies username to preferred_username if not set
-                if (formData.username && !formData.preferred_username) {
-                  formData.preferred_username = formData.username;
-                }
-                // Only validate phone if user has started typing in it
-                if (formData.phone_number && formData.phone_number.length > 0) {
-                  const cleaned = formData.phone_number.trim().replace(/\D/g, '');
-
-                  if (cleaned.length === 10) {
-                    // Valid - add country code
-                    formData.phone_number = `+1${cleaned}`;
-                  } else if (cleaned.length === 11 && cleaned.startsWith('1')) {
-                    // Valid - already has country code
-                    formData.phone_number = `+${cleaned}`;
-                  } else {
-                    // Only show error if they've typed enough digits to be wrong
-                    // (i.e., don't show error after typing just 1 digit)
-                    if (cleaned.length >= 10) {
-                      errors.phone_number = `Phone number must be exactly 10 digits`;
-                    }
-                    // Don't show error if they're still typing (< 10 digits)
+                try {
+                  if (formData.phone_number) {
+                    formatPhoneToE164(formData.phone_number);
                   }
+                } catch (err: any) {
+                  errors.phone_number = err.message;
+                }
+                if (Object.keys(errors).length > 0) return errors;
+              },
+              async handleSignUp(formData) {
+                const { signUp } = await import('aws-amplify/auth');
+                const { username, password, options } = formData;
+                const userAttributes = { ...options?.userAttributes };
+
+                // Format phone
+                if (userAttributes.phone_number) {
+                  userAttributes.phone_number = formatPhoneToE164(userAttributes.phone_number);
                 }
 
-                // Only validate password match if BOTH fields have values
-                if (formData.password && formData.confirm_password) {
-                  if (formData.password !== formData.confirm_password) {
-                    errors.confirm_password = 'Passwords do not match';
-                  }
-                }
+                // Map username to preferred_username to satisfy Cognito schema
+                userAttributes.preferred_username = username;
 
-                if (Object.keys(errors).length > 0) {
-                  return errors;
-                }
+                console.log("Submitting to Cognito:", { username, userAttributes });
+
+                return signUp({
+                  username,
+                  password,
+                  options: { userAttributes },
+                });
               },
             }}
+
           >
             <LayoutContent />
           </Authenticator>

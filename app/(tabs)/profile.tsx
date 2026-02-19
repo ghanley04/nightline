@@ -87,8 +87,7 @@ export default function ProfileScreen() {
 
       //if (!mounted.current) return;
       if (data.hasMembership && data.tokens && data.tokens.length > 0) {
-        const activeMemberships = data.tokens.filter(t => t.active !== false);
-
+        const activeMemberships = data.tokens.filter(t => t.active === true && t.token_id);
         const formatted = activeMemberships.map((t, i) => ({
           id: `token-${i}`,
           tokenId: t.token_id,
@@ -164,7 +163,7 @@ export default function ProfileScreen() {
 
               console.log('📦 Delete account result:', result);
 
-              if (result.success === false) {
+              if (result?.success === false) {
                 Alert.alert('Error', result.error || 'Failed to delete account.');
                 return;
               }
@@ -475,6 +474,8 @@ export default function ProfileScreen() {
                 return;
               }
 
+              await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+
               // Refresh the membership tokens to update the UI
               await fetchMembershipTokens();
 
@@ -705,7 +706,7 @@ export default function ProfileScreen() {
           )}
         </View>
 
-        <View style={styles.section}>
+        {/* <View style={styles.section}>
           <Text style={styles.sectionTitle}>App Settings</Text>
           <Card style={styles.settingsCard}>
             <View style={styles.settingItem}>
@@ -736,7 +737,7 @@ export default function ProfileScreen() {
               />
             </View>
           </Card>
-        </View>
+        </View> */}
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Subscriptions</Text>
@@ -762,9 +763,9 @@ export default function ProfileScreen() {
                           <MapPin size={18} color={colors.primary} />
                           <Text style={styles.settingText}>{passType}</Text>
                         </View>
-                        <View style={styles.settingDate}>
-                          <Text style={styles.settingText}>Date: XX/XX/XX</Text>
-                        </View>
+                        {/* <View style={styles.settingDate}> 
+                          <Text style={styles.settingText}>Expires at: {p.date}</Text>
+                        </View> */}
                       </View>
 
                       <TouchableOpacity

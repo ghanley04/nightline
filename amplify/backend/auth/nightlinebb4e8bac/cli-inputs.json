@@ -61,17 +61,18 @@
     "breakCircularDependency": true,
     "dependsOn": [],
     "thirdPartyAuth": false,
-    "userPoolGroups": false,
-    "adminQueries": false,
+    "userPoolGroups": true,
+    "adminQueries": true,
     "hostedUI": true,
     "hostedUIDomainName": "nightline-oath",
     "authProvidersUserPool": [],
     "hostedUIProviderMeta": "[]",
-    "oAuthMetadata": "{\"AllowedOAuthFlows\":[\"code\"],\"AllowedOAuthScopes\":[\"phone\",\"email\",\"openid\",\"profile\",\"aws.cognito.signin.user.admin\"],\"CallbackURLs\":[\"https://d84l1y8p4kdic.cloudfront.net/\"],\"LogoutURLs\":[\"https://d84l1y8p4kdic.cloudfront.net/\"]}",
     "authProviders": [],
     "parentStack": {
       "Ref": "AWS::StackId"
     },
-    "permissions": []
+    "permissions": [],
+    "oAuthMetadata": "{\"AllowedOAuthFlows\":[\"code\"],\"AllowedOAuthScopes\":[\"phone\",\"email\",\"openid\",\"profile\",\"aws.cognito.signin.user.admin\"],\"CallbackURLs\":[\"https://d84l1y8p4kdic.cloudfront.net/\"],\"LogoutURLs\":[\"https://d84l1y8p4kdic.cloudfront.net/\"]}",
+    "adminQueryGroup": "BusDrivers"
   }
 }

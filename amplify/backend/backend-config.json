@@ -1,5 +1,27 @@
 {
   "api": {
+    "AdminQueries": {
+      "authorizationType": "AMAZON_COGNITO_USER_POOLS",
+      "dependsOn": [
+        {
+          "attributes": [
+            "UserPoolId"
+          ],
+          "category": "auth",
+          "resourceName": "nightlinebb4e8bac"
+        },
+        {
+          "attributes": [
+            "Arn",
+            "Name"
+          ],
+          "category": "function",
+          "resourceName": "AdminQueries774eec3c"
+        }
+      ],
+      "providerPlugin": "awscloudformation",
+      "service": "API Gateway"
+    },
     "apiNightline": {
       "dependsOn": [
         {
@@ -81,6 +103,22 @@
           ],
           "category": "function",
           "resourceName": "deleteAccount"
+        },
+        {
+          "attributes": [
+            "Name",
+            "Arn"
+          ],
+          "category": "function",
+          "resourceName": "validateToken"
+        },
+        {
+          "attributes": [
+            "Name",
+            "Arn"
+          ],
+          "category": "function",
+          "resourceName": "InviteRedirect"
         }
       ],
       "providerPlugin": "awscloudformation",
@@ -118,6 +156,26 @@
     }
   },
   "function": {
+    "AdminQueries774eec3c": {
+      "build": true,
+      "dependsOn": [
+        {
+          "attributes": [
+            "UserPoolId"
+          ],
+          "category": "auth",
+          "resourceName": "nightlinebb4e8bac"
+        }
+      ],
+      "providerPlugin": "awscloudformation",
+      "service": "Lambda"
+    },
+    "InviteRedirect": {
+      "build": true,
+      "dependsOn": [],
+      "providerPlugin": "awscloudformation",
+      "service": "Lambda"
+    },
     "acceptInvite": {
       "build": true,
       "providerPlugin": "awscloudformation",
@@ -168,9 +226,57 @@
       "build": true,
       "providerPlugin": "awscloudformation",
       "service": "Lambda"
+    },
+    "validateToken": {
+      "build": true,
+      "dependsOn": [
+        {
+          "attributes": [
+            "Name",
+            "Arn",
+            "StreamArn"
+          ],
+          "category": "storage",
+          "resourceName": "GroupData"
+        }
+      ],
+      "providerPlugin": "awscloudformation",
+      "service": "Lambda"
     }
   },
   "parameters": {
+    "AMPLIFY_function_AdminQueries774eec3c_deploymentBucketName": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "AdminQueries774eec3c"
+        }
+      ]
+    },
+    "AMPLIFY_function_AdminQueries774eec3c_s3Key": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "AdminQueries774eec3c"
+        }
+      ]
+    },
+    "AMPLIFY_function_InviteRedirect_deploymentBucketName": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "InviteRedirect"
+        }
+      ]
+    },
+    "AMPLIFY_function_InviteRedirect_s3Key": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "InviteRedirect"
+        }
+      ]
+    },
     "AMPLIFY_function_acceptInvite_deploymentBucketName": {
       "usedBy": [
         {
@@ -352,6 +458,22 @@
         {
           "category": "function",
           "resourceName": "stripeCheckout"
+        }
+      ]
+    },
+    "AMPLIFY_function_validateToken_deploymentBucketName": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "validateToken"
+        }
+      ]
+    },
+    "AMPLIFY_function_validateToken_s3Key": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "validateToken"
         }
       ]
     }

@@ -129,6 +129,24 @@
           "delete"
         ]
       }
+    },
+    "/validateToken": {
+      "name": "/validateToken",
+      "lambdaFunction": "validateToken",
+      "permissions": {
+        "setting": "private",
+        "auth": [
+          "read",
+          "update"
+        ]
+      }
+    },
+    "/invite/{inviteCode}": {
+      "name": "/invite/{inviteCode}",
+      "lambdaFunction": "InviteRedirect",
+      "permissions": {
+        "setting": "open"
+      }
     }
   }
 }

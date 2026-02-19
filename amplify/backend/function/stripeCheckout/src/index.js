@@ -21,7 +21,8 @@ exports.handler = async (event) => {
                 body = JSON.parse(decodedBody);
             } else {
                 body = typeof event.body === 'string' ? JSON.parse(event.body) : event.body;
-            }        } catch (e) {
+            }
+        } catch (e) {
             console.error('❌ Failed to parse event body:', e, event.body);
         }
 
@@ -47,8 +48,8 @@ exports.handler = async (event) => {
             mode: price.recurring ? 'subscription' : 'payment',
             payment_method_types: ['card'],
             line_items: [lineItem],
-            success_url: `https://yourapp.com/success?session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: 'https://yourapp.com/cancel',
+            success_url: `nightlineapp://payment/success?session_id={CHECKOUT_SESSION_ID}`,
+            cancel_url: `nightlineapp://payment/cancel`,
             metadata: {
                 userId,   // store Cognito user ID
                 groupId,  // store the new group ID

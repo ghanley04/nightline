@@ -10,6 +10,8 @@ import { Plan } from '../interfaces/plan';
 import { MembershipResponse, InviteResponse } from '../interfaces/interface';
 import { useAuthenticator } from '@aws-amplify/ui-react-native';
 import { getJwtToken } from "../auth/auth";
+import { useFocusEffect } from '@react-navigation/native';
+import { TextInput } from 'react-native';
 
 export default function SubscriptionPlansScreen() {
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -17,11 +19,15 @@ export default function SubscriptionPlansScreen() {
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<'one-time' | 'subscription'>('subscription');
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingPlanId, setLoadingPlanId] = useState<string | null>(null);
   const [hasGroup, setHasGroup] = useState(false);
   const [hasIndividual, setHasIndividual] = useState(false);
   const [hasGreek, setHasGreek] = useState(false);
   const [hasOther, setHasOther] = useState(false);
   const { user } = useAuthenticator(ctx => [ctx.user]);
+  const [hasNight, setHasNight] = useState(false);
+  const [hasBus, setHasBus] = useState(false);
+  const [inviteCode, setInviteCode] = useState<string>('');
 
   useEffect(() => {
     const fetchPlans = async () => {
@@ -101,7 +107,16 @@ export default function SubscriptionPlansScreen() {
           if (groupId.startsWith("greek")) {
             console.log('🎫 [FETCH_MEMBERSHIP] Setting hasGreek = true');
             setHasGreek(true);
+          }
+          if (groupId.startsWith("night")) {
+            console.log('🎫 [FETCH_MEMBERSHIP] Setting hasNight = true');
+            setHasNight(true);
+          }
+          if (groupId.startsWith("bus")) {
+            console.log('🎫 [FETCH_MEMBERSHIP] Setting hasBus = true');
+            setHasBus(true);
           } else {
+            console.log('🎫 [FETCH_MEMBERSHIP] Setting hasOther = true');
             setHasOther(true);
           }
         });
@@ -110,6 +125,8 @@ export default function SubscriptionPlansScreen() {
         setHasGreek(false);
         setHasGroup(false);
         setHasIndividual(false);
+        setHasNight(false);
+        setHasBus(false);
         setHasOther(false);
       }
 
@@ -125,14 +142,95 @@ export default function SubscriptionPlansScreen() {
     fetchMembershipTokens();
   }, [user]);
 
+  useFocusEffect(
+    useCallback(() => {
+      console.log('📱 [FOCUS] Plans screen focused, refreshing membership...');
+      fetchMembershipTokens();
+    }, [fetchMembershipTokens])
+  );
+
+  // ✅ NEW: Function to check if subscribing to this plan will replace an existing subscription
+  const checkSubscriptionConflict = (planName: string): { hasConflict: boolean; message: string } => {
+    const lowerPlanName = planName.toLowerCase();
+
+    // Check if buying an individual plan while having individual
+    if (lowerPlanName.includes('individual') && hasIndividual) {
+      return {
+        hasConflict: true,
+        message: 'You already have an Individual subscription. Subscribing to this plan will replace your current Individual subscription.'
+      };
+    }
+
+    // Check if buying a group plan while having group
+    if (lowerPlanName.includes('group') && hasGroup) {
+      return {
+        hasConflict: true,
+        message: 'You already have a Group subscription. Subscribing to this plan will replace your current Group subscription.'
+      };
+    }
+
+    // Check if buying individual while having group or vice versa
+    if (lowerPlanName.includes('individual') && hasGroup) {
+      return {
+        hasConflict: true,
+        message: 'You currently have a Group subscription. Switching to Individual will cancel your Group subscription and all members will lose access.'
+      };
+    }
+
+    if (lowerPlanName.includes('group') && hasIndividual) {
+      return {
+        hasConflict: true,
+        message: 'You currently have an Individual subscription. Switching to Group will cancel your Individual subscription.'
+      };
+    }
+
+    return { hasConflict: false, message: '' };
+  };
+
   async function createCheckoutSession(priceId: string, planName: string) {
     console.log('💳 [CHECKOUT] ========== STARTING CHECKOUT SESSION ==========');
     console.log('💳 [CHECKOUT] priceId:', priceId);
     console.log('💳 [CHECKOUT] planName:', planName);
 
+    // ✅ NEW: Check for subscription conflicts
+    const conflict = checkSubscriptionConflict(planName);
+
+    if (conflict.hasConflict) {
+      // Show warning dialog
+      Alert.alert(
+        'Subscription Change',
+        conflict.message + '\n\nDo you want to continue?',
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
+            onPress: () => {
+              console.log('💳 [CHECKOUT] User cancelled due to subscription conflict');
+            }
+          },
+          {
+            text: 'Continue',
+            style: 'destructive',
+            onPress: () => {
+              console.log('💳 [CHECKOUT] User accepted subscription change');
+              proceedWithCheckout(priceId, planName);
+            }
+          }
+        ]
+      );
+      return; // Don't proceed immediately
+    }
+
+    // No conflict, proceed directly
+    proceedWithCheckout(priceId, planName);
+  }
+
+  // ✅ NEW: Separated checkout logic so it can be called after user confirms
+  async function proceedWithCheckout(priceId: string, planName: string) {
     try {
       console.log('💳 [CHECKOUT] Setting isLoading to true');
       setIsLoading(true);
+      setLoadingPlanId(priceId);
 
       console.log('💳 [CHECKOUT] Getting current user...');
       const user = await getCurrentUser();
@@ -146,9 +244,19 @@ export default function SubscriptionPlansScreen() {
 
       console.log('💳 [CHECKOUT] Determining group type...');
       let groupType = 'individual';
-      if (planName.toLowerCase().includes('greek')) groupType = 'greek';
-      else if (planName.toLowerCase().includes('group')) groupType = 'group';
-      else if (planName.toLowerCase().includes('night')) groupType = 'night';
+      const lowerPlanName = planName.toLowerCase();
+
+      if (lowerPlanName.includes('greek')) {
+        groupType = 'greek';
+      } else if (lowerPlanName.includes('group')) {
+        groupType = 'group';
+      } else if (lowerPlanName.includes('night') || lowerPlanName.includes('pass')) {
+        groupType = 'night';
+      } else if (lowerPlanName.includes('bus')) {
+        groupType = 'bus';
+      }
+      console.log('💳 [CHECKOUT] Plan name (lowercase):', planName.toLowerCase());
+      console.log('💳 [CHECKOUT] Contains "night"?:', planName.toLowerCase().includes('night'));
       console.log('💳 [CHECKOUT] Group type determined:', groupType);
 
       console.log('💳 [CHECKOUT] Making POST request to create-checkout-session...');
@@ -210,11 +318,11 @@ export default function SubscriptionPlansScreen() {
       if (result.type === 'dismiss' || result.type === 'cancel') {
         console.log('🌐 [BROWSER] User closed browser, refreshing membership...');
         await fetchMembershipTokens();
-        
+
         // Check if we should fetch invite link
-        if (data.groupId && 
-            (data.groupId.toLowerCase().includes("group") || 
-             data.groupId.toLowerCase().includes("greek"))) {
+        if (data.groupId &&
+          (data.groupId.toLowerCase().includes("group") ||
+            data.groupId.toLowerCase().includes("greek"))) {
           console.log('🔗 [INVITE] Fetching invite link after checkout...');
           await fetchInviteLink(data.groupId);
         }
@@ -237,6 +345,8 @@ export default function SubscriptionPlansScreen() {
     } finally {
       console.log('💳 [CHECKOUT] Setting isLoading to false');
       setIsLoading(false);
+      setLoadingPlanId(null);
+
       console.log('💳 [CHECKOUT] ========== CHECKOUT SESSION ENDED ==========');
     }
   }
@@ -272,22 +382,68 @@ export default function SubscriptionPlansScreen() {
       if (data.inviteLink) {
         console.log('🔗 [INVITE] Setting invite link:', data.inviteLink);
         setInviteLink(data.inviteLink);
-        
+
         // Show the invite link to the user
         Alert.alert(
           "Group Created!",
           `Share this link with your group members:\n\n${data.inviteLink}`,
           [
-            { text: "Copy Link", onPress: () => {
-              // You can add clipboard functionality here if needed
-              console.log('📋 [INVITE] Link copied');
-            }},
+            {
+              text: "Copy Link", onPress: () => {
+                // You can add clipboard functionality here if needed
+                console.log('📋 [INVITE] Link copied');
+              }
+            },
             { text: "OK" }
           ]
         );
       }
     } catch (e) {
       console.error('❌ [INVITE] Error fetching invite link:', e);
+    }
+  };
+
+  const handleJoinInvite = async () => {
+    if (!inviteCode) {
+      Alert.alert('Enter Invite Code', 'Please enter a valid invite code.');
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      const currentUser = await getCurrentUser();
+      const response = await post({
+        apiName: 'apiNightline',
+        path: '/acceptInvite',
+        options: {
+          body: {
+            groupId: inviteCode,
+            userId: currentUser.userId,
+            userName: currentUser.username,
+            email: currentUser.attributes?.email ?? null,
+            phoneNumber: currentUser.attributes?.phone_number ?? null,
+          },
+        },
+      });
+
+      const { body } = await response.response;
+      const result = await body.json() as { alreadyMember?: boolean, success?: boolean, message?: string };
+
+      Alert.alert(
+        result.alreadyMember ? "Already a Member" : "Joined Successfully",
+        result.alreadyMember
+          ? "You're already in this group."
+          : "You've successfully joined the group!"
+      );
+
+      // Refresh membership
+      await fetchMembershipTokens();
+      setInviteCode('');
+    } catch (err) {
+      console.error('❌ [INVITE] Error joining invite:', err);
+      Alert.alert('Error', 'Failed to join invite. Please check the code and try again.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -364,36 +520,43 @@ export default function SubscriptionPlansScreen() {
                       </Text>
                     )
                   ) : (
-                    plan.name.toLowerCase().includes('individual') && hasIndividual ? (
-                      <Text style={{ color: 'gray', marginTop: 8 }}>
-                        You already have an individual plan.
-                      </Text>
-                    ) : plan.name.toLowerCase().includes('group') && hasGroup ? (
-                      <Text style={{ color: 'gray', marginTop: 8 }}>
-                        You already have a group plan.
-                      </Text>
-                    ) : (
-                      <Button
-                        title={isLoading ? "Loading..." : "Subscribe"}
-                        onPress={() => {
-                          console.log(`🔘 [BUTTON] Subscribe button pressed for plan:`, plan.name);
-                          console.log(`🔘 [BUTTON] Plan ID being passed:`, plan.id);
-                          if (!isLoading) {
-                            createCheckoutSession(plan.id, plan.name);
-                          } else {
-                            console.log(`🔘 [BUTTON] Button press ignored - already loading`);
-                          }
-                        }}
-                        disabled={isLoading}
-                      />
-                    )
+                    <Button
+                      title={loadingPlanId === plan.id ? "Loading..." : "Subscribe"}
+                      onPress={() => {
+                        console.log(`🔘 [BUTTON] Subscribe button pressed for plan:`, plan.name);
+                        console.log(`🔘 [BUTTON] Plan ID being passed:`, plan.id);
+                        if (!isLoading) {
+                          createCheckoutSession(plan.id, plan.name);
+                        } else {
+                          console.log(`🔘 [BUTTON] Button press ignored - already loading`);
+                        }
+                      }}
+                      disabled={isLoading}
+                    />
                   )}
                 </View>
               </View>
             );
           })}
         </View>
+        {/* Invite Code Section */}
+
+
       </ScrollView>
+      <View style={styles.inviteContainer}>
+        <Text style={styles.inviteLabel}>Have an invite code?</Text>
+        <TextInput
+          style={styles.inviteInput}
+          placeholder="Enter code here"
+          value={inviteCode}
+          onChangeText={setInviteCode}
+        />
+        <Button
+          title="Join Group"
+          onPress={handleJoinInvite}
+          disabled={isLoading || !inviteCode}
+        />
+      </View>
     </View>
   );
 }
@@ -464,10 +627,51 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: colors.primary,
   },
-  loadingContainer: { 
-    flex: 1, 
-    justifyContent: 'center', 
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: colors.background,
   },
+  inviteTitle: {
+    color: colors.primary,
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  inviteButton: {
+    backgroundColor: colors.primary,
+    paddingVertical: 14,
+    borderRadius: 12,
+    width: '100%',
+    alignItems: 'center',
+  },
+  inviteButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  inviteContainer: {
+    padding: 16,
+    backgroundColor: colors.blacktint3,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  inviteInput: {
+    width: '100%',
+    backgroundColor: '#f0f0f0',  // light background
+    color: '#111',                // dark text
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 16,
+    marginBottom: 12,
+  },
+  inviteLabel: {
+    color: colors.secondary,
+    marginBottom: 8,
+    fontSize: 16
+  },
+
 });

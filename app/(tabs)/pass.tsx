@@ -61,16 +61,21 @@ export default function PassScreen() {
 
       if (!mounted.current) return;
       if (data.hasMembership && data.tokens && data.tokens.length > 0) {
-        const formatted = data.tokens.map((t, i) => ({
-          id: `token-${i}`,
-          tokenId: t.token_id,
-          groupId: t.group_id,
-        }));
+        const formatted = data.tokens
+          .filter(t => t.active) // only include tokens where active === true
+          .map((t, i) => ({
+            id: `token-${i}`,
+            tokenId: t.token_id,
+            groupId: t.group_id,
+            active: t.active, // keep it in case you need it later
+          }));
 
         setPasses(formatted);
         setLoadingSubscription(false);
-        //set subscription obj
 
+        if (formatted.length === 0) {
+          setError('Membership active but no active pass tokens found. Please contact support.');
+        }
       } else if (data.hasMembership && data.tokens && data.tokens.length === 0) {
         console.warn('Membership found but no tokens available');
         setPasses([]);
@@ -219,7 +224,7 @@ export default function PassScreen() {
         return (
           <DigitalPass
             key={p.id}
-            id={p.id} 
+            id={p.id}
             passType={getPassType(p.groupId)}
             username={user.username}
             qrPayload={qrPayloads[p.id]}

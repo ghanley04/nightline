@@ -12,7 +12,7 @@ export default {
     "newArchEnabled": false,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.nightline-app",
+      "bundleIdentifier": "com.gghanley04.nightline-app",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       },
@@ -46,8 +46,16 @@ export default {
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
+        },
+      ],
+
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Nighline to access your camera."
         }
       ],
+
       "expo-secure-store",
       "expo-font"
     ],
