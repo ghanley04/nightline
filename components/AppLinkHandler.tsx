@@ -8,8 +8,20 @@ export default function AppLinkHandler() {
   useEffect(() => {
     const handleUrl = (url: string) => {
       console.log('Opened from URL:', url);
-      const path = url.replace('nightline://', '');
-      const [route, token] = path.split('/'); // ["invite", "2bdf3f029a43"]
+
+      // 🔥 Ignore OAuth callbacks — let Amplify handle these
+      if (url.includes('code=') && url.includes('state=')) {
+        console.log('OAuth callback detected, ignoring in AppLinkHandler');
+        return;
+      }
+
+      // Handle nightlineapp:// deep links
+      const path = url
+        .replace('nightlineapp://', '')
+        .replace('nightline://', '')
+        .replace(/^\/--\//, ''); // strip Expo Go prefix if present
+
+      const [route, token] = path.split('/');
 
       if (route === 'invite' && token) {
         router.push(`/invite/${token}`);

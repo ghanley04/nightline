@@ -1,16 +1,22 @@
-import { Redirect, Stack, useRouter } from "expo-router";
+import 'react-native-url-polyfill/auto';
+import { fetch as amplifyFetch } from '@aws-amplify/react-native';
+
+import { Stack, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import * as Font from 'expo-font';
 import React, { useEffect, useState } from "react";
-import { Authenticator, useAuthenticator, ThemeProvider, defaultDarkModeOverride, Theme } from '@aws-amplify/ui-react-native';
-import { useColorScheme, StyleSheet, View, ViewProps, TextInput } from 'react-native';
+import { Authenticator, useAuthenticator, ThemeProvider } from '@aws-amplify/ui-react-native';
+import { useColorScheme, StyleSheet } from 'react-native';
 import colors from '../constants/colors';
 import { LinearGradient } from "expo-linear-gradient";
 import 'react-native-url-polyfill/auto';
-import { getCurrentUser, fetchAuthSession } from 'aws-amplify/auth';
+import { fetchAuthSession } from 'aws-amplify/auth';
 import AppLinkHandler from '@/components/AppLinkHandler';
+import * as Linking from 'expo-linking';
+import { Amplify } from 'aws-amplify';
+import { Hub } from 'aws-amplify/utils';
+import config from '../src/aws-exports';
 
-
+// URL.canParse polyfill
 if (typeof URL !== 'undefined' && !URL.canParse) {
   URL.canParse = function (url, base) {
     try {
@@ -22,37 +28,61 @@ if (typeof URL !== 'undefined' && !URL.canParse) {
   };
 }
 
-import { Amplify } from 'aws-amplify';
-import config from '../src/aws-exports';
-// import amplifyconfig from '../src/amplifyconfiguration.json';
-// Amplify.configure(amplifyconfig);
+const redirectUrl = Linking.createURL('/');
+console.log('Redirect URL:', redirectUrl);
+console.log('AWS Config OAuth:', JSON.stringify((config as any).oauth));
 
-Amplify.configure(config);
+const { oauth: _discard, ...configWithoutOauth } = config as any;
 
-// console.log("Amplify configuration loaded:", amplifyconfig);
+Amplify.configure({
+  ...configWithoutOauth,
+  oauth: {
+    ...(config as any).oauth,
+    redirectSignIn: redirectUrl,
+    redirectSignOut: redirectUrl,
+    responseType: 'code',
+  }
+});
+
+// Log AFTER configure to verify
+console.log('Final redirect:', redirectUrl);
+const currentConfig = Amplify.getConfig();
+console.log('Final Amplify OAuth:', JSON.stringify(currentConfig));
+
+// Listen for auth events to catch real errors
+Hub.listen('auth', ({ payload }) => {
+  console.log('Auth event:', payload.event);
+  if (payload.event) {
+    console.log('Auth data:', JSON.stringify(payload.event));
+  }
+});
+
 SplashScreen.preventAutoHideAsync();
+
+// ─── Layout Content (inside Authenticator) ───────────────────────────────────
 
 function LayoutContent() {
   const router = useRouter();
   const { authStatus } = useAuthenticator(context => [context.authStatus]);
   const [isReady, setIsReady] = useState(false);
-  const [role, setRole] = useState<'admin' | 'driver' | 'user' | null>(null);
   const [groups, setGroups] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    console.log('Auth Status:', authStatus);
+  }, [authStatus]);
+
+  useEffect(() => {
     async function loadGroups() {
       try {
-        const session = await fetchAuthSession({ bypassCache: true });
+        const session = await fetchAuthSession();
         const idToken = session.tokens?.idToken;
-        if (!idToken) throw new Error('No ID token');
-
+        if (!idToken) {
+          setGroups([]);
+          return;
+        }
         const payload = idToken.payload as any;
-        const userGroups = payload['cognito:groups'] || [];
-        console.log("Groups from token:", userGroups);
-
-
-        setGroups(userGroups);
+        setGroups(payload['cognito:groups'] || []);
       } catch (err) {
         console.error('Error loading groups:', err);
         setGroups([]);
@@ -61,27 +91,26 @@ function LayoutContent() {
       }
     }
 
-    loadGroups();
-  }, []);
+    if (authStatus === 'authenticated') {
+      loadGroups();
+    } else {
+      setLoading(false);
+    }
+  }, [authStatus]);
 
   const isAdmin = groups.includes('Admin');
   const isBusDriver = groups.includes('BusDrivers');
 
-  useEffect(() => {
-    if (!loading) {
-      console.log("isAdmin:", isAdmin);
-      console.log("isBusDriver:", isBusDriver);
-    }
-  }, [loading, isAdmin, isBusDriver]);
-
+  // Hide splash and mark ready
   useEffect(() => {
     setIsReady(true);
     SplashScreen.hideAsync();
   }, []);
 
+  // Route based on group once everything is loaded
   useEffect(() => {
-    // 🔥 Wait for both ready AND groups loaded before routing
     if (isReady && !loading) {
+      console.log('Routing — isAdmin:', isAdmin, '| isBusDriver:', isBusDriver);
       if (isAdmin) {
         router.replace('/(adminTabs)');
       } else if (isBusDriver) {
@@ -92,48 +121,33 @@ function LayoutContent() {
     }
   }, [isReady, loading, isAdmin, isBusDriver]);
 
-  if (!isReady) {
-    return null;
-  }
+  if (!isReady) return null;
 
-  return (
-    <Stack screenOptions={{ headerShown: false }} />
-  );
+  return <Stack screenOptions={{ headerShown: false }} />;
 }
+
+// ─── Phone Formatter ─────────────────────────────────────────────────────────
 
 export function formatPhoneToE164(phone: string): string {
-  if (!phone) {
-    throw new Error("Phone number is required");
-  }
-
-  // Remove everything except digits
-  const digits = phone.replace(/\D/g, "");
-
-  // 10-digit US number
-  if (digits.length === 10) {
-    return `+1${digits}`;
-  }
-
-  // 11-digit starting with 1
-  if (digits.length === 11 && digits.startsWith("1")) {
-    return `+${digits}`;
-  }
-
-  throw new Error("Phone number must be 10 digits (US)");
+  if (!phone) throw new Error('Phone number is required');
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  throw new Error('Phone number must be 10 digits (US)');
 }
 
+// ─── Root Layout ─────────────────────────────────────────────────────────────
 
 export default function RootLayout() {
   const [isReady, setIsReady] = useState(false);
   const colorMode = useColorScheme();
-
 
   useEffect(() => {
     async function hideSplash() {
       try {
         await SplashScreen.hideAsync();
       } catch (e) {
-        console.warn("Splash screen hide error:", e);
+        console.warn('Splash screen hide error:', e);
       } finally {
         setIsReady(true);
       }
@@ -141,9 +155,7 @@ export default function RootLayout() {
     hideSplash();
   }, []);
 
-  if (!isReady) {
-    return null;
-  }
+  if (!isReady) return null;
 
   return (
     <ThemeProvider
@@ -238,10 +250,8 @@ export default function RootLayout() {
                     },
                   ]}
                 />
-
               ),
             }}
-            // Custom validation before submitting to Cognito
             services={{
               async validateCustomSignUp(formData) {
                 const errors: Record<string, string> = {};
@@ -259,15 +269,12 @@ export default function RootLayout() {
                 const { username, password, options } = formData;
                 const userAttributes = { ...options?.userAttributes };
 
-                // Format phone
                 if (userAttributes.phone_number) {
                   userAttributes.phone_number = formatPhoneToE164(userAttributes.phone_number);
                 }
 
-                // Map username to preferred_username to satisfy Cognito schema
                 userAttributes.preferred_username = username;
-
-                console.log("Submitting to Cognito:", { username, userAttributes });
+                console.log('Submitting to Cognito:', { username, userAttributes });
 
                 return signUp({
                   username,
@@ -275,8 +282,26 @@ export default function RootLayout() {
                   options: { userAttributes },
                 });
               },
+              async handleSignIn({ username, password }) {
+                const { signIn } = await import('aws-amplify/auth');
+                try {
+                  const result = await signIn({
+                    username,
+                    password,
+                    options: {
+                      authFlowType: 'USER_PASSWORD_AUTH'
+                    }
+                  });
+                  console.log('Sign in result:', JSON.stringify(result));
+                  return result;
+                } catch (err: any) {
+                  console.log('Sign in ERROR name:', err.name);
+                  console.log('Sign in ERROR message:', err.message);
+                  console.log('Sign in ERROR full:', JSON.stringify(err));
+                  throw err;
+                }
+              },
             }}
-
           >
             <LayoutContent />
           </Authenticator>
@@ -286,16 +311,11 @@ export default function RootLayout() {
   );
 }
 
+// ─── Styles ──────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     justifyContent: 'space-between',
-  },
-  background: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 0,
-    bottom: 0,
   },
 });
