@@ -1,7 +1,5 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-//import { Check } from 'lucide-react-native';
-import Card from './Card';
 import colors from '@/constants/colors';
 
 interface SubscriptionCardProps {
@@ -24,59 +22,63 @@ export const SubscriptionCard: React.FC<SubscriptionCardProps> = ({
   disabled = false,
 }) => {
   return (
-    <TouchableOpacity 
+    <TouchableOpacity
       onPress={onSelect}
       activeOpacity={0.8}
       disabled={disabled}
+      style={[
+        styles.card,
+        isSelected && styles.cardSelected,
+        disabled && styles.cardDisabled,
+      ]}
     >
-      <Card 
-        // style={[
-        //   styles.card,
-        //   isSelected && styles.selectedCard,
-        //   disabled && styles.disabledCard
-        // ]}
-      >
-        {isRecommended && (
-          <View style={styles.recommendedBadge}>
-            <Text style={styles.recommendedText}>Recommended</Text>
-          </View>
-        )}
-        
-        <View style={styles.header}>
-          <Text style={styles.title}>{title}</Text>
-          <View style={styles.priceContainer}>
-            <Text style={styles.price}>${price.toFixed(2)}</Text>
-            <Text style={styles.period}>/month</Text>
-          </View>
+      {isRecommended && (
+        <View style={styles.recommendedBadge}>
+          <Text style={styles.recommendedText}>★ Recommended</Text>
         </View>
-        
-        <View style={styles.featuresContainer}>
-          {features.map((feature, index) => (
-            <View key={index} style={styles.featureItem}>
-              {/* <Check size={16} color={colors.primary} /> */}
-              <Text style={styles.featureText}>{feature}</Text>
-            </View>
-          ))}
+      )}
+
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.title}>{title}</Text>
+        <View style={styles.priceRow}>
+          <Text style={styles.priceCurrency}>$</Text>
+          <Text style={styles.price}>{price.toFixed(2)}</Text>
+          <Text style={styles.period}>/mo</Text>
         </View>
-        
-        <View style={styles.selectContainer}>
-          <View 
-            style={[
-              styles.radioButton,
-              isSelected && styles.radioButtonSelected,
-              disabled && styles.radioButtonDisabled
-            ]}
-          >
-            {isSelected && <View style={styles.radioButtonInner} />}
+      </View>
+
+      {/* Features */}
+      <View style={styles.featuresContainer}>
+        {features.map((feature, index) => (
+          <View key={index} style={styles.featureItem}>
+            <Text style={styles.featureDot}>·</Text>
+            <Text style={styles.featureText}>{feature}</Text>
           </View>
-          <Text style={[
+        ))}
+      </View>
+
+      {/* Select row */}
+      <View style={styles.selectRow}>
+        <View
+          style={[
+            styles.radio,
+            isSelected && styles.radioSelected,
+            disabled && styles.radioDisabled,
+          ]}
+        >
+          {isSelected && <View style={styles.radioInner} />}
+        </View>
+        <Text
+          style={[
             styles.selectText,
-            disabled && styles.disabledText
-          ]}>
-            {isSelected ? 'Selected' : disabled ? 'Not Available' : 'Select Plan'}
-          </Text>
-        </View>
-      </Card>
+            isSelected && styles.selectTextActive,
+            disabled && styles.selectTextDisabled,
+          ]}
+        >
+          {isSelected ? 'Selected' : disabled ? 'Not Available' : 'Select Plan'}
+        </Text>
+      </View>
     </TouchableOpacity>
   );
 };
@@ -84,104 +86,137 @@ export const SubscriptionCard: React.FC<SubscriptionCardProps> = ({
 const styles = StyleSheet.create({
   card: {
     marginBottom: 16,
-    padding: 0,
+    borderRadius: 16,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.surfaceBorder,
     overflow: 'hidden',
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    elevation: 4,
   },
-  selectedCard: {
-    borderWidth: 2,
+  cardSelected: {
     borderColor: colors.primary,
+    shadowColor: colors.shadowGold,
+    shadowOpacity: 0.5,
   },
-  disabledCard: {
-    opacity: 0.6,
+  cardDisabled: {
+    opacity: 0.5,
   },
   recommendedBadge: {
     position: 'absolute',
-    top: 12,
-    right: 12,
-    backgroundColor: colors.primary,
-    paddingHorizontal: 8,
+    top: 14,
+    right: 14,
+    backgroundColor: colors.primaryGlow,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 12,
+    borderRadius: 20,
     zIndex: 1,
   },
   recommendedText: {
-    color: colors.secondary,
-    fontSize: 12,
-    fontWeight: '600',
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
   header: {
-    padding: 16,
-    backgroundColor: colors.secondary,
+    padding: 18,
+    backgroundColor: colors.surfaceRaised,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.surfaceBorder,
   },
   title: {
     fontSize: 18,
-    fontWeight: 'bold',
-    color: colors.background,
+    fontWeight: '700',
+    color: colors.text,
     marginBottom: 8,
   },
-  priceContainer: {
+  priceRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
   },
+  priceCurrency: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.primary,
+    marginRight: 1,
+  },
   price: {
-    fontSize: 24,
-    fontWeight: 'bold',
+    fontSize: 28,
+    fontWeight: '800',
     color: colors.primary,
   },
   period: {
     fontSize: 14,
-    color: colors.background,
+    color: colors.textSecondary,
     marginLeft: 4,
   },
   featuresContainer: {
-    padding: 16,
+    padding: 18,
+    gap: 10,
   },
   featureItem: {
     flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  featureDot: {
+    fontSize: 20,
+    color: colors.primary,
+    lineHeight: 20,
+    marginTop: -2,
   },
   featureText: {
-    marginLeft: 8,
     fontSize: 14,
-    color: colors.text,
+    color: colors.textSecondary,
+    flex: 1,
+    lineHeight: 20,
   },
-  selectContainer: {
+  selectRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
+    borderTopColor: colors.divider,
+    gap: 10,
   },
-  radioButton: {
+  radio: {
     width: 20,
     height: 20,
     borderRadius: 10,
     borderWidth: 2,
-    borderColor: colors.primary,
+    borderColor: colors.border,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  radioButtonSelected: {
+  radioSelected: {
     borderColor: colors.primary,
   },
-  radioButtonDisabled: {
-    borderColor: colors.textLight,
+  radioDisabled: {
+    borderColor: colors.textMuted,
   },
-  radioButtonInner: {
+  radioInner: {
     width: 10,
     height: 10,
     borderRadius: 5,
     backgroundColor: colors.primary,
   },
   selectText: {
-    marginLeft: 8,
     fontSize: 14,
     fontWeight: '500',
-    color: colors.text,
+    color: colors.textSecondary,
   },
-  disabledText: {
-    color: colors.textLight,
+  selectTextActive: {
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  selectTextDisabled: {
+    color: colors.textMuted,
   },
 });
 

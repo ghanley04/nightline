@@ -11,8 +11,8 @@ interface BusStopCardProps {
   isSelected?: boolean;
 }
 
-export const BusStopCard: React.FC<BusStopCardProps> = ({ 
-  stop, 
+export const BusStopCard: React.FC<BusStopCardProps> = ({
+  stop,
   onPress,
   isSelected = false,
 }) => {
@@ -22,37 +22,48 @@ export const BusStopCard: React.FC<BusStopCardProps> = ({
   };
 
   return (
-    <TouchableOpacity 
+    <TouchableOpacity
       onPress={() => onPress(stop)}
       activeOpacity={0.7}
+      style={styles.touchable}
     >
-      <Card 
-        // style={[
-        //   styles.card,
-        //   isSelected && styles.selectedCard
-        // ]}
+      <Card
+        variant={isSelected ? 'raised' : 'default'}
+        style={[styles.card, isSelected && styles.selectedCard]}
       >
         <View style={styles.header}>
           <View style={styles.nameContainer}>
-            <MapPin size={18} color={colors.primary} />
-            <Text style={styles.name}>{stop.name}</Text>
+            <View style={[styles.iconBg, isSelected && styles.iconBgSelected]}>
+              <MapPin size={14} color={isSelected ? '#0A0A0F' : colors.primary} />
+            </View>
+            <Text style={[styles.name, isSelected && styles.nameSelected]}>
+              {stop.name}
+            </Text>
           </View>
           {stop.eta.length > 0 && (
-            <View style={styles.nextBusContainer}>
-              <Clock size={14} color={colors.textLight} />
-              <Text style={styles.nextBusText}>
-                Next: {formatETA(stop.eta[0])}
-              </Text>
+            <View style={styles.etaBadge}>
+              <Clock size={12} color={colors.primary} />
+              <Text style={styles.etaBadgeText}>{formatETA(stop.eta[0])}</Text>
             </View>
           )}
         </View>
 
         {isSelected && stop.eta.length > 0 && (
           <View style={styles.etaList}>
-            <Text style={styles.upcomingText}>Upcoming buses:</Text>
+            <Text style={styles.upcomingLabel}>Upcoming arrivals</Text>
             {stop.eta.map((eta, index) => (
-              <View key={index} style={styles.etaItem}>
-                <Text style={styles.etaNumber}>{index + 1}</Text>
+              <View key={index} style={styles.etaRow}>
+                <View style={styles.etaIndex}>
+                  <Text style={styles.etaIndexText}>{index + 1}</Text>
+                </View>
+                <View style={styles.etaBar}>
+                  <View
+                    style={[
+                      styles.etaBarFill,
+                      { width: `${Math.max(10, 100 - eta * 4)}%` },
+                    ]}
+                  />
+                </View>
                 <Text style={styles.etaTime}>{formatETA(eta)}</Text>
               </View>
             ))}
@@ -64,12 +75,15 @@ export const BusStopCard: React.FC<BusStopCardProps> = ({
 };
 
 const styles = StyleSheet.create({
+  touchable: {
+    marginBottom: 10,
+  },
   card: {
-    marginBottom: 12,
+    padding: 14,
   },
   selectedCard: {
-    borderWidth: 2,
     borderColor: colors.primary,
+    borderWidth: 1.5,
   },
   header: {
     flexDirection: 'row',
@@ -79,58 +93,95 @@ const styles = StyleSheet.create({
   nameContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  name: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginLeft: 8,
-    color: colors.text,
-  },
-  nextBusContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.background,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  nextBusText: {
-    fontSize: 12,
-    color: colors.textLight,
-    marginLeft: 4,
-  },
-  etaList: {
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  upcomingText: {
-    fontSize: 14,
-    fontWeight: '500',
-    marginBottom: 8,
-    color: colors.text,
-  },
-  etaItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  etaNumber: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: colors.primary,
-    color: colors.secondary,
-    textAlign: 'center',
-    fontWeight: 'bold',
-    fontSize: 12,
-    lineHeight: 20,
+    flex: 1,
     marginRight: 8,
   },
-  etaTime: {
-    fontSize: 14,
+  iconBg: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: colors.primaryGlow,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  iconBgSelected: {
+    backgroundColor: colors.primary,
+  },
+  name: {
+    fontSize: 15,
+    fontWeight: '600',
     color: colors.text,
+    flex: 1,
+  },
+  nameSelected: {
+    color: colors.primary,
+  },
+  etaBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primaryGlow,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+    gap: 4,
+  },
+  etaBadgeText: {
+    fontSize: 12,
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  etaList: {
+    marginTop: 14,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: colors.divider,
+    gap: 10,
+  },
+  upcomingLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.textMuted,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
+  etaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  etaIndex: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    backgroundColor: colors.primaryGlow,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  etaIndexText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  etaBar: {
+    flex: 1,
+    height: 4,
+    backgroundColor: colors.surfaceBorder,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  etaBarFill: {
+    height: '100%',
+    backgroundColor: colors.primary,
+    borderRadius: 2,
+  },
+  etaTime: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    fontWeight: '500',
+    width: 70,
+    textAlign: 'right',
   },
 });
 

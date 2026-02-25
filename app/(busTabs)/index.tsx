@@ -4,7 +4,7 @@ import { CameraView, Camera } from 'expo-camera';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import { post } from 'aws-amplify/api';
-import { X, CheckCircle, XCircle } from 'lucide-react-native';
+import { CheckCircle, XCircle } from 'lucide-react-native';
 import colors from '@/constants/colors';
 
 interface ValidationResponse {
@@ -29,6 +29,11 @@ export default function ScanTickets() {
       setHasPermission(status === 'granted');
     })();
   }, []);
+
+  const resetScan = () => {
+    setScanned(false);
+    setLastResult(null);
+  };
 
   const handleBarCodeScanned = async ({ data }: { data: string }) => {
     if (scanned || validating) return;
@@ -61,13 +66,13 @@ export default function ScanTickets() {
         Alert.alert(
           '✅ Valid Pass',
           `Welcome ${result.userName || 'Guest'}!\n${result.passType || 'Pass'} - ${result.groupId || ''}`,
-          [{ text: 'Scan Next', onPress: () => { setScanned(false); setLastResult(null); } }]
+          [{ text: 'Scan Next', onPress: resetScan }]
         );
       } else {
         Alert.alert(
           '❌ Invalid Pass',
           result.message || result.error || 'This pass is not valid',
-          [{ text: 'Try Again', onPress: () => { setScanned(false); setLastResult(null); } }]
+          [{ text: 'Try Again', onPress: resetScan }]
         );
       }
     } catch (err) {
@@ -75,7 +80,7 @@ export default function ScanTickets() {
       Alert.alert(
         'Error',
         'Failed to validate pass. Please try again.',
-        [{ text: 'OK', onPress: () => { setScanned(false); setLastResult(null); } }]
+        [{ text: 'OK', onPress: resetScan }]
       );
     } finally {
       setValidating(false);
@@ -104,47 +109,57 @@ export default function ScanTickets() {
     <View style={styles.container}>
       <StatusBar style="light" />
 
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Scan Ticket</Text>
-        <TouchableOpacity onPress={() => router.back()} style={styles.closeButton}>
-          <X size={24} color="#FFFFFF" />
-        </TouchableOpacity>
-      </View>
-
       <CameraView
         style={styles.camera}
         facing="back"
         onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
         barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
       >
+        {/* Dark vignette overlay */}
         <View style={styles.overlay}>
+
+          {/* Top label */}
+          <View style={styles.topLabel}>
+            <Text style={styles.topLabelText}>
+              {validating ? 'Validating...' : scanned ? 'Processing...' : 'Scan a Nightline Pass'}
+            </Text>
+          </View>
+
+          {/* Scan frame */}
           <View style={styles.scanArea}>
             <View style={[styles.corner, styles.topLeft]} />
             <View style={[styles.corner, styles.topRight]} />
             <View style={[styles.corner, styles.bottomLeft]} />
             <View style={[styles.corner, styles.bottomRight]} />
+
+            {/* Subtle inner glow when active */}
+            {!scanned && (
+              <View style={styles.scanInner} />
+            )}
           </View>
 
-          <View style={styles.instructionContainer}>
-            <Text style={styles.instructionText}>
-              {validating ? 'Validating pass...' : scanned ? 'Processing...' : 'Position QR code within the frame'}
-            </Text>
-          </View>
+          <Text style={styles.instructionText}>
+            Align the QR code within the frame
+          </Text>
 
+          {/* Result card */}
           {lastResult && (
-            <View style={[styles.resultContainer, lastResult.valid ? styles.validResult : styles.invalidResult]}>
+            <View style={[
+              styles.resultContainer,
+              lastResult.valid ? styles.validResult : styles.invalidResult,
+            ]}>
               {lastResult.valid ? (
                 <>
-                  <CheckCircle size={40} color="#10b981" />
-                  <Text style={styles.resultTitle}>Valid Pass</Text>
-                  <Text style={styles.resultDetails}>{lastResult.userName || 'Guest'}</Text>
-                  <Text style={styles.resultSubtitle}>{lastResult.passType || 'Pass'}</Text>
+                  <CheckCircle size={36} color={colors.success} />
+                  <Text style={[styles.resultTitle, { color: colors.success }]}>Valid Pass</Text>
+                  <Text style={styles.resultName}>{lastResult.userName || 'Guest'}</Text>
+                  <Text style={styles.resultPassType}>{lastResult.passType || 'Pass'}</Text>
                 </>
               ) : (
                 <>
-                  <XCircle size={40} color="#ef4444" />
-                  <Text style={styles.resultTitle}>Invalid Pass</Text>
-                  <Text style={styles.resultDetails}>
+                  <XCircle size={36} color={colors.error} />
+                  <Text style={[styles.resultTitle, { color: colors.error }]}>Invalid Pass</Text>
+                  <Text style={styles.resultName}>
                     {lastResult.message || lastResult.error || 'Not authorized'}
                   </Text>
                 </>
@@ -154,88 +169,180 @@ export default function ScanTickets() {
         </View>
       </CameraView>
 
-      <View style={styles.bottomContainer}>
-        {validating && <ActivityIndicator size="large" color={colors.primary} />}
-        {scanned && !validating && (
-          <TouchableOpacity
-            style={styles.resetButton}
-            onPress={() => { setScanned(false); setLastResult(null); }}
-          >
-            <Text style={styles.resetButtonText}>Scan Next Pass</Text>
+      {/* Bottom bar */}
+      <View style={styles.bottomBar}>
+        {validating ? (
+          <ActivityIndicator size="large" color={colors.primary} />
+        ) : scanned ? (
+          <TouchableOpacity style={styles.scanNextButton} onPress={resetScan} activeOpacity={0.8}>
+            <Text style={styles.scanNextText}>Scan Next Pass</Text>
           </TouchableOpacity>
+        ) : (
+          <Text style={styles.bottomHint}>Hold steady — scanning automatically</Text>
         )}
-        <Text style={styles.bottomText}>
-          {scanned ? 'Tap "Scan Next Pass" to continue' : 'Align the QR code within the frame to scan'}
-        </Text>
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 50,
-    paddingBottom: 20,
-    backgroundColor: 'rgba(0,0,0,0.8)',
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
   },
-  headerTitle: { fontSize: 24, fontWeight: 'bold', color: '#FFFFFF' },
-  closeButton: { padding: 8 },
+  centered: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: colors.background,
+    gap: 12,
+  },
+  messageText: {
+    fontSize: 17,
+    color: colors.text,
+    textAlign: 'center',
+    paddingHorizontal: 32,
+  },
+  subText: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    paddingHorizontal: 40,
+  },
+
+  // Camera
   camera: { flex: 1 },
   overlay: {
     flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 24,
+  },
+
+  // Top label
+  topLabel: {
+    position: 'absolute',
+    top: 24,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
     backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: colors.surfaceBorder,
+  },
+  topLabelText: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '600',
+    letterSpacing: 0.3,
+  },
+
+  // Scan frame
+  scanArea: {
+    width: 260,
+    height: 260,
+    position: 'relative',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  scanArea: { width: 280, height: 280, position: 'relative' },
-  corner: { position: 'absolute', width: 40, height: 40, borderColor: colors.primary },
-  topLeft: { top: 0, left: 0, borderTopWidth: 4, borderLeftWidth: 4 },
-  topRight: { top: 0, right: 0, borderTopWidth: 4, borderRightWidth: 4 },
-  bottomLeft: { bottom: 0, left: 0, borderBottomWidth: 4, borderLeftWidth: 4 },
+  corner: {
+    position: 'absolute',
+    width: 36,
+    height: 36,
+    borderColor: colors.primary,
+  },
+  topLeft:     { top: 0,    left: 0,  borderTopWidth: 4,    borderLeftWidth: 4  },
+  topRight:    { top: 0,    right: 0, borderTopWidth: 4,    borderRightWidth: 4 },
+  bottomLeft:  { bottom: 0, left: 0,  borderBottomWidth: 4, borderLeftWidth: 4  },
   bottomRight: { bottom: 0, right: 0, borderBottomWidth: 4, borderRightWidth: 4 },
-  instructionContainer: { marginTop: 40, paddingHorizontal: 20 },
-  instructionText: { color: '#FFFFFF', fontSize: 16, textAlign: 'center', fontWeight: '500' },
+  scanInner: {
+    width: 188,
+    height: 188,
+    borderRadius: 4,
+    backgroundColor: colors.primaryGlow,
+  },
+
+  instructionText: {
+    color: colors.textSecondary,
+    fontSize: 14,
+    textAlign: 'center',
+    fontWeight: '500',
+  },
+
+  // Result card
   resultContainer: {
     position: 'absolute',
-    bottom: 100,
-    backgroundColor: '#FFFFFF',
+    bottom: 20,
+    backgroundColor: colors.surfaceRaised,
     borderRadius: 16,
     padding: 24,
     alignItems: 'center',
-    minWidth: 280,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 5,
+    minWidth: 260,
+    borderWidth: 1.5,
+    gap: 6,
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    elevation: 8,
   },
-  validResult: { borderColor: '#10b981', borderWidth: 2 },
-  invalidResult: { borderColor: '#ef4444', borderWidth: 2 },
-  resultTitle: { fontSize: 20, fontWeight: 'bold', marginTop: 12, color: '#000' },
-  resultDetails: { fontSize: 16, marginTop: 8, color: '#555', textAlign: 'center' },
-  resultSubtitle: { fontSize: 14, marginTop: 4, color: '#777' },
-  bottomContainer: {
-    width: '100%',
-    paddingHorizontal: 20,
-    paddingVertical: 30,
-    backgroundColor: 'rgba(0,0,0,0.8)',
+  validResult: {
+    borderColor: colors.success,
+    shadowColor: colors.success,
+  },
+  invalidResult: {
+    borderColor: colors.error,
+    shadowColor: colors.error,
+  },
+  resultTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    marginTop: 4,
+    letterSpacing: 0.3,
+  },
+  resultName: {
+    fontSize: 15,
+    color: colors.text,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  resultPassType: {
+    fontSize: 13,
+    color: colors.textSecondary,
+  },
+
+  // Bottom bar
+  bottomBar: {
+    paddingHorizontal: 24,
+    paddingVertical: 24,
+    backgroundColor: colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: colors.surfaceBorder,
     alignItems: 'center',
+    minHeight: 90,
+    justifyContent: 'center',
   },
-  resetButton: {
+  scanNextButton: {
     backgroundColor: colors.primary,
-    paddingVertical: 16,
-    paddingHorizontal: 32,
+    paddingVertical: 14,
+    paddingHorizontal: 48,
     borderRadius: 12,
-    marginBottom: 12,
+    shadowColor: colors.shadowGold,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 1,
+    shadowRadius: 10,
+    elevation: 4,
   },
-  resetButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: 'bold' },
-  bottomText: { color: '#FFFFFF', fontSize: 14, textAlign: 'center', opacity: 0.8 },
-  messageText: { fontSize: 18, color: '#FFFFFF', textAlign: 'center', marginTop: 12 },
-  subText: { fontSize: 14, color: '#CCCCCC', textAlign: 'center', paddingHorizontal: 40, marginTop: 8 },
+  scanNextText: {
+    color: '#0A0A0F',
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  bottomHint: {
+    color: colors.textMuted,
+    fontSize: 13,
+    textAlign: 'center',
+  },
 });

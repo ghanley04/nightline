@@ -562,76 +562,126 @@ export default function SubscriptionPlansScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  topBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingVertical: 12,
+  container: {
+    flex: 1,
     backgroundColor: colors.background,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.textLight,
-  },
-  tabButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-  },
-  tabButtonActive: {
-    backgroundColor: colors.primary,
-  },
-  tabText: {
-    color: colors.text,
-    fontWeight: '600',
-  },
-  tabTextActive: {
-    fontWeight: '600',
-  },
-  planList: {
-    padding: 20,
-  },
-  planContent: {
-    paddingHorizontal: 16,
-  },
-  planDescription: {
-    paddingVertical: 16,
-    color: colors.text,
-  },
-  planCard: {
-    marginBottom: 20,
-    paddingBottom: 16,
-    backgroundColor: colors.blacktint3,
-    borderRadius: 10,
-    shadowColor: '#000',
-    shadowOpacity: .1,
-    shadowRadius: 6,
-  },
-  planTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 4,
-    color: colors.primary,
-  },
-  planHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-    backgroundColor: colors.secondary,
-    borderTopLeftRadius: 10,
-    borderTopRightRadius: 10,
-    paddingTop: 16,
-    paddingHorizontal: 16,
-    color: colors.primary,
-  },
-  planPrice: {
-    marginVertical: 8,
-    fontWeight: '500',
-    color: colors.primary,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: colors.background,
+  },
+
+  // Tab switcher
+  topBar: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    backgroundColor: colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.surfaceBorder,
+  },
+  tabButton: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    alignItems: 'center',
+    backgroundColor: colors.surfaceRaised,
+    borderWidth: 1,
+    borderColor: colors.surfaceBorder,
+  },
+  tabButtonActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  tabText: {
+    color: colors.textSecondary,
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  tabTextActive: {
+    color: '#0A0A0F',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+
+  // Plans list
+  planList: {
+    padding: 20,
+    gap: 16,
+  },
+  planCard: {
+    borderRadius: 16,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.surfaceBorder,
+    overflow: 'hidden',
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    elevation: 4,
+    marginBottom: 16,
+  },
+  planHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: colors.surfaceRaised,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.surfaceBorder,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  planTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  planPrice: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  planContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+  },
+  planDescription: {
+    paddingVertical: 14,
+    color: colors.textSecondary,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+
+  // Invite section
+  inviteContainer: {
+    padding: 16,
+    backgroundColor: colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: colors.surfaceBorder,
+  },
+  inviteLabel: {
+    color: colors.textSecondary,
+    marginBottom: 10,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  inviteInput: {
+    width: '100%',
+    backgroundColor: colors.surfaceRaised,
+    color: colors.text,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+    fontSize: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   inviteTitle: {
     color: colors.primary,
@@ -648,30 +698,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   inviteButtonText: {
-    color: '#fff',
+    color: '#0A0A0F',
     fontSize: 16,
     fontWeight: 'bold',
   },
-  inviteContainer: {
-    padding: 16,
-    backgroundColor: colors.blacktint3,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  inviteInput: {
-    width: '100%',
-    backgroundColor: '#f0f0f0',  // light background
-    color: '#111',                // dark text
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 16,
-    marginBottom: 12,
-  },
-  inviteLabel: {
-    color: colors.secondary,
-    marginBottom: 8,
-    fontSize: 16
-  },
-
 });

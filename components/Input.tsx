@@ -1,13 +1,13 @@
 import React, { useState, ReactNode } from 'react';
-import { 
-  View, 
-  TextInput, 
-  Text, 
-  StyleSheet, 
-  ViewStyle, 
+import {
+  View,
+  TextInput,
+  Text,
+  StyleSheet,
+  ViewStyle,
   TextStyle,
   TextInputProps,
-  TouchableOpacity
+  TouchableOpacity,
 } from 'react-native';
 import { Eye, EyeOff } from 'lucide-react-native';
 import colors from '@/constants/colors';
@@ -35,36 +35,48 @@ export const Input: React.FC<InputProps> = ({
   ...props
 }) => {
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
-
-  const togglePasswordVisibility = () => {
-    setIsPasswordVisible(!isPasswordVisible);
-  };
+  const [isFocused, setIsFocused] = useState(false);
 
   return (
     <View style={[styles.container, containerStyle]}>
-      {label && <Text style={[styles.label, labelStyle]}>{label}</Text>}
-      <View style={[styles.inputContainer, error ? styles.inputError : null]}>
-        {leftIcon && <View style={styles.leftIconContainer}>{leftIcon}</View>}
+      {label && (
+        <Text style={[styles.label, labelStyle]}>{label}</Text>
+      )}
+      <View
+        style={[
+          styles.inputContainer,
+          isFocused && styles.inputFocused,
+          error ? styles.inputError : null,
+        ]}
+      >
+        {leftIcon && (
+          <View style={styles.leftIconContainer}>{leftIcon}</View>
+        )}
         <TextInput
           style={[styles.input, inputStyle]}
-          placeholderTextColor={colors.placeholder}
+          placeholderTextColor={colors.textMuted}
           secureTextEntry={secureTextEntry && !isPasswordVisible}
+          onFocus={() => setIsFocused(true)}
+          onBlur={() => setIsFocused(false)}
+          selectionColor={colors.primary}
           {...props}
         />
         {secureTextEntry && (
-          <TouchableOpacity 
-            onPress={togglePasswordVisibility} 
+          <TouchableOpacity
+            onPress={() => setIsPasswordVisible(v => !v)}
             style={styles.eyeIcon}
           >
             {isPasswordVisible ? (
-              <EyeOff size={20} color={colors.textLight} />
+              <EyeOff size={20} color={colors.textSecondary} />
             ) : (
-              <Eye size={20} color={colors.textLight} />
+              <Eye size={20} color={colors.textSecondary} />
             )}
           </TouchableOpacity>
         )}
       </View>
-      {error && <Text style={[styles.errorText, errorStyle]}>{error}</Text>}
+      {error && (
+        <Text style={[styles.errorText, errorStyle]}>{error}</Text>
+      )}
     </View>
   );
 };
@@ -75,10 +87,12 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   label: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '500',
     marginBottom: 8,
-    color: colors.text,
+    color: colors.textSecondary,
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
   },
   inputContainer: {
     flexDirection: 'row',
@@ -86,15 +100,23 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 12,
-    backgroundColor: colors.background,
+    backgroundColor: colors.surface,
+  },
+  inputFocused: {
+    borderColor: colors.primary,
+    shadowColor: colors.shadowGold,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 8,
+    elevation: 2,
   },
   leftIconContainer: {
-    paddingLeft: 16,
+    paddingLeft: 14,
   },
   input: {
     flex: 1,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 13,
     fontSize: 16,
     color: colors.text,
   },
@@ -104,10 +126,10 @@ const styles = StyleSheet.create({
   errorText: {
     color: colors.error,
     fontSize: 12,
-    marginTop: 4,
+    marginTop: 5,
   },
   eyeIcon: {
-    padding: 10,
+    padding: 12,
   },
 });
 

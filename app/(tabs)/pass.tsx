@@ -18,66 +18,38 @@ export default function PassScreen() {
   const { subscription, guestPasses } = useSubscriptionStore();
   const router = useRouter();
 
-  // const client = generateClient();
-  const [passes, setPasses] = useState<{
-    groupId: string; id: string; tokenId: string
-  }[]>([]);
+  const [passes, setPasses] = useState<{ groupId: string; id: string; tokenId: string }[]>([]);
   const [qrPayloads, setQrPayloads] = useState<{ [key: string]: string }>({});
   const [isRefreshing, setIsRefreshing] = useState(true);
   const [loadingSubscription, setLoadingSubscription] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const mounted = useRef(true);
 
-  // Fetch membership tokens
-
   const fetchMembershipTokens = useCallback(async () => {
     const token = await getJwtToken();
-    // setIsRefreshing(true);
-
-    if (!user) {
-      setIsRefreshing(false);
-      return;
-    }
-    console.log("Checking User:", user);
+    if (!user) { setIsRefreshing(false); return; }
     try {
       setError(null);
-
       const response = await get({
         apiName: "apiNightline",
         path: "/fetchMembership",
-        options: {
-          queryParams: { userId: user.userId },
-        },
+        options: { queryParams: { userId: user.userId } },
       });
       const { body } = await response.response;
       const rawData = await body.json();
-
-      console.log('Lambda response:', body);
-      console.log('Lambda response - raw data:', rawData);
-
-      // Cast raw JSON to MembershipResponse
       const data = rawData as unknown as MembershipResponse;
-      console.log('Fetched membership data:', data);
 
       if (!mounted.current) return;
       if (data.hasMembership && data.tokens && data.tokens.length > 0) {
         const formatted = data.tokens
-          .filter(t => t.active) // only include tokens where active === true
-          .map((t, i) => ({
-            id: `token-${i}`,
-            tokenId: t.token_id,
-            groupId: t.group_id,
-            active: t.active, // keep it in case you need it later
-          }));
-
+          .filter(t => t.active)
+          .map((t, i) => ({ id: `token-${i}`, tokenId: t.token_id, groupId: t.group_id, active: t.active }));
         setPasses(formatted);
         setLoadingSubscription(false);
-
         if (formatted.length === 0) {
           setError('Membership active but no active pass tokens found. Please contact support.');
         }
       } else if (data.hasMembership && data.tokens && data.tokens.length === 0) {
-        console.warn('Membership found but no tokens available');
         setPasses([]);
         setError('Membership active but no pass tokens found. Please contact support.');
       } else {
@@ -99,28 +71,19 @@ export default function PassScreen() {
 
   useEffect(() => {
     fetchMembershipTokens();
-    const backendInterval = setInterval(fetchMembershipTokens, 24 * 60 * 60 * 1000); // 24h refresh
-    return () => {
-      clearInterval(backendInterval);
-      mounted.current = false;
-    };
+    const backendInterval = setInterval(fetchMembershipTokens, 24 * 60 * 60 * 1000);
+    return () => { clearInterval(backendInterval); mounted.current = false; };
   }, [fetchMembershipTokens]);
 
-  // Rotate QR codes hourly
   useEffect(() => {
     if (passes.length === 0) return;
-
     const updateQRCodes = () => {
       const newPayloads: { [key: string]: string } = {};
-      passes.forEach(p => {
-        newPayloads[p.id] = `${p.tokenId}:${Date.now()}`;
-      });
+      passes.forEach(p => { newPayloads[p.id] = `${p.tokenId}:${Date.now()}`; });
       setQrPayloads(newPayloads);
     };
-
-    updateQRCodes(); // initial
-    const interval = setInterval(updateQRCodes, 60 * 60 * 1000); // every hour
-
+    updateQRCodes();
+    const interval = setInterval(updateQRCodes, 60 * 60 * 1000);
     return () => clearInterval(interval);
   }, [passes]);
 
@@ -129,44 +92,30 @@ export default function PassScreen() {
     fetchMembershipTokens().finally(() => setIsRefreshing(false));
   };
 
-
-
   const handleInviteGuest = async () => {
     try {
       const response = await get({
         apiName: "apiNightline",
         path: "/createInvite",
-        options: {
-          queryParams: { userId: user.userId },
-        },
+        options: { queryParams: { userId: user.userId } },
       });
-
       const { body } = await response.response;
       const data = (await body.json()) as InviteResponse;
-
       if (data?.inviteLink) alert(`Invite your guest: ${data.inviteLink}`);
     } catch (err) {
       console.error(err);
     }
   };
 
-  //Get pass type to display on pass
   const getPassType = (groupId: string) => {
     if (!groupId) return 'Unknown';
-
-    const prefix = groupId.slice(0, 3).toLowerCase(); // first 3 letters
-
+    const prefix = groupId.slice(0, 3).toLowerCase();
     switch (prefix) {
-      case 'ind':
-        return 'Individual Pass';
-      case 'nig':
-        return 'Night Pass';
-      case 'gre':
-        return 'Greek Pass';
-      case 'gro':
-        return 'Group Pass';
-      default:
-        return 'Unknown Pass';
+      case 'ind': return 'Individual Pass';
+      case 'nig': return 'Night Pass';
+      case 'gre': return 'Greek Pass';
+      case 'gro': return 'Group Pass';
+      default:    return 'Unknown Pass';
     }
   };
 
@@ -174,90 +123,93 @@ export default function PassScreen() {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={{ marginTop: 10 }}>Loading your pass...</Text>
+        <Text style={styles.loadingText}>Loading your pass...</Text>
       </View>
     );
   }
-  // Render
+
   if (!subscription && passes.length === 0) {
     return (
-      <View style={styles.noSubscriptionContainer}>
-        <Text style={styles.noSubscriptionTitle}>No Active Subscription</Text>
-        <Text style={styles.noSubscriptionText}>
-          Subscribe to access your digital pass and Night Line shuttle services.
+      <View style={styles.emptyContainer}>
+        <View style={styles.emptyIcon}>
+          <Text style={styles.emptyIconText}>🎟</Text>
+        </View>
+        <Text style={styles.emptyTitle}>No Active Subscription</Text>
+        <Text style={styles.emptyText}>
+          Subscribe to access your digital pass and Nightline shuttle services.
         </Text>
         <Button
-          title="Get Subscription"
+          title="View Plans"
           onPress={() => router.push('/plans')}
-          style={styles.subscribeButton}
+          style={styles.emptyButton}
+          size="large"
         />
       </View>
     );
   }
 
-
-
   if (passes.length === 0) {
     return (
-      <View style={styles.noSubscriptionContainer}>
-        <Text style={styles.noSubscriptionTitle}>No Pass Available</Text>
-        <Text style={styles.noSubscriptionText}>
+      <View style={styles.emptyContainer}>
+        <Text style={styles.emptyTitle}>No Pass Available</Text>
+        <Text style={styles.emptyText}>
           Unable to load your membership pass. Please try refreshing.
         </Text>
         <Button
           title="Refresh"
           onPress={handleRefreshPass}
-          style={styles.subscribeButton}
+          style={styles.emptyButton}
         />
       </View>
     );
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ padding: 20 }}>
-      <StatusBar style="dark" />
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.scrollContent}
+      showsVerticalScrollIndicator={false}
+    >
+      <StatusBar style="light" />
 
-      {passes.map((p, i) => {
-        const token = p.tokenId;
-        const passType = getPassType(p.groupId);
-
-        return (
-          <DigitalPass
-            key={p.id}
-            id={p.id}
-            passType={getPassType(p.groupId)}
-            username={user.username}
-            qrPayload={qrPayloads[p.id]}
-            isRefreshing={isRefreshing}
-            onRefresh={handleRefreshPass}
-          />
-
-        );
-      })}
+      {passes.map((p) => (
+        <DigitalPass
+          key={p.id}
+          id={p.id}
+          passType={getPassType(p.groupId)}
+          username={user.username}
+          qrPayload={qrPayloads[p.id]}
+          isRefreshing={isRefreshing}
+          onRefresh={handleRefreshPass}
+        />
+      ))}
 
       {guestPasses.length > 0 && (
         <View style={styles.guestSection}>
           <View style={styles.guestHeader}>
             <Text style={styles.sectionTitle}>Guest Passes</Text>
             <TouchableOpacity style={styles.inviteButton} onPress={handleInviteGuest}>
-              <UserPlus size={16} color={colors.primary} />
+              <UserPlus size={15} color={colors.primary} />
               <Text style={styles.inviteText}>Invite Guest</Text>
             </TouchableOpacity>
           </View>
 
-          <Card style={styles.guestCard}>
-            {guestPasses.map(pass => (
-              <View key={pass.id} style={styles.guestItem}>
-                <View style={styles.guestInfo}>
-                  <Text style={styles.guestName}>{pass.guestName}</Text>
-                  <Text style={styles.guestValidity}>
-                    Valid until {new Date(pass.validUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </Text>
+          <Card>
+            {guestPasses.map((pass, i) => (
+              <View key={pass.id}>
+                <View style={styles.guestItem}>
+                  <View>
+                    <Text style={styles.guestName}>{pass.guestName}</Text>
+                    <Text style={styles.guestValidity}>
+                      Valid until {new Date(pass.validUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </Text>
+                  </View>
+                  <View style={styles.guestStatus}>
+                    <View style={styles.guestStatusDot} />
+                    <Text style={styles.guestStatusText}>Active</Text>
+                  </View>
                 </View>
-                <View style={styles.guestStatus}>
-                  <View style={styles.guestStatusDot} />
-                  <Text style={styles.guestStatusText}>Active</Text>
-                </View>
+                {i < guestPasses.length - 1 && <View style={styles.divider} />}
               </View>
             ))}
           </Card>
@@ -267,60 +219,129 @@ export default function PassScreen() {
   );
 }
 
-// Styles
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  passCard: {
-    width: '100%',
-    borderRadius: 16,
-    paddingVertical: 24,
-    paddingHorizontal: 16,
-    alignItems: 'center',
-    backgroundColor: '#f9fafb',
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 3,
-    marginBottom: 20,
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
   },
-  passTitle: { fontSize: 20, fontWeight: '700', marginBottom: 12 },
-  qrContainer: { backgroundColor: '#fff', padding: 10, borderRadius: 12, marginBottom: 10 },
-  passUserName: { fontSize: 16, fontWeight: '600', marginTop: 8 },
-  passSubtitle: { fontSize: 13, color: '#777', marginTop: 2 },
-  refreshButton: { flexDirection: 'row', alignItems: 'center', marginTop: 12 },
-  refreshText: { color: colors.primary, marginLeft: 6, fontWeight: '500' },
-  rotating: { transform: [{ rotate: '360deg' }] },
+  scrollContent: {
+    padding: 20,
+    paddingBottom: 40,
+  },
 
-  // Subscription Info
-  subscriptionInfo: { marginTop: 10 },
-  sectionTitle: { fontSize: 18, fontWeight: '600', marginBottom: 8 },
-  infoCard: { padding: 12, borderRadius: 10 },
-  infoRow: { flexDirection: 'row', justifyContent: 'space-between', marginVertical: 4 },
-  infoLabel: { color: '#666' },
-  infoValue: { fontWeight: '500' },
-  statusContainer: { flexDirection: 'row', alignItems: 'center' },
-  statusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'green', marginRight: 5 },
-  statusText: { color: 'green' },
+  // Loading
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: colors.background,
+    gap: 12,
+  },
+  loadingText: {
+    color: colors.textSecondary,
+    fontSize: 15,
+  },
 
-  // Guest Passes
-  guestSection: { marginTop: 20 },
-  guestHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  inviteButton: { flexDirection: 'row', alignItems: 'center' },
-  inviteText: { color: colors.primary, marginLeft: 4 },
-  guestCard: { padding: 12, borderRadius: 10, marginTop: 10 },
-  guestItem: { flexDirection: 'row', justifyContent: 'space-between', marginVertical: 4 },
-  guestInfo: {},
-  guestName: { fontWeight: '500' },
-  guestValidity: { color: '#777' },
-  guestStatus: { flexDirection: 'row', alignItems: 'center' },
-  guestStatusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'green', marginRight: 5 },
-  guestStatusText: { color: 'green' },
-  noGuestsText: { textAlign: 'center', color: '#888', marginTop: 10 },
+  // Empty states
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+    backgroundColor: colors.background,
+    gap: 12,
+  },
+  emptyIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: colors.primaryGlow,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  emptyIconText: {
+    fontSize: 36,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.text,
+    textAlign: 'center',
+  },
+  emptyText: {
+    textAlign: 'center',
+    color: colors.textSecondary,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  emptyButton: {
+    marginTop: 8,
+    minWidth: 160,
+  },
 
-  // No Subscription
-  noSubscriptionContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
-  noSubscriptionTitle: { fontSize: 20, fontWeight: '600', marginBottom: 10 },
-  noSubscriptionText: { textAlign: 'center', color: '#555', marginBottom: 20 },
-  subscribeButton: { marginTop: 10 },
+  // Guest passes
+  guestSection: {
+    marginTop: 8,
+  },
+  guestHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  sectionTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textMuted,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  inviteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  inviteText: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  guestItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: colors.divider,
+  },
+  guestName: {
+    fontWeight: '600',
+    color: colors.text,
+    fontSize: 15,
+    marginBottom: 2,
+  },
+  guestValidity: {
+    color: colors.textSecondary,
+    fontSize: 12,
+  },
+  guestStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  guestStatusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: colors.success,
+  },
+  guestStatusText: {
+    color: colors.success,
+    fontSize: 13,
+    fontWeight: '600',
+  },
 });

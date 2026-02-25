@@ -6,22 +6,28 @@ interface CardProps {
   children: ReactNode;
   style?: ViewStyle;
   elevation?: number;
+  /** Use 'raised' for a more prominent surface (e.g. modals, featured cards) */
+  variant?: 'default' | 'raised';
 }
 
-export const Card: React.FC<CardProps> = ({ 
-  children, 
-  style, 
-  elevation = 2 
+export const Card: React.FC<CardProps> = ({
+  children,
+  style,
+  elevation = 2,
+  variant = 'default',
 }) => {
+  const bgColor = variant === 'raised' ? colors.surfaceRaised : colors.surface;
+
   return (
-    <View 
+    <View
       style={[
-        styles.card, 
-        { 
-          shadowOpacity: 0.1 * elevation,
+        styles.card,
+        {
+          backgroundColor: bgColor,
+          shadowOpacity: 0.4 * elevation,
           elevation: elevation,
         },
-        style
+        style,
       ]}
     >
       {children}
@@ -31,12 +37,13 @@ export const Card: React.FC<CardProps> = ({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.card,
     borderRadius: 16,
     padding: 16,
+    borderWidth: 1,
+    borderColor: colors.surfaceBorder,
     shadowColor: colors.shadow,
-    shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 12,
   },
 });
 
