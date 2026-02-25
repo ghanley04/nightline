@@ -1,6 +1,7 @@
 {
   "cli": {
-    "version": ">= 5.9.1"
+    "version": ">= 16.18.0",
+    "appVersionSource": "remote"
   },
   "build": {
     "development": {
@@ -10,7 +11,7 @@
         "image": "expo-sdk-51"
       },
       "android": {
-        "image": "expo-sdk-51"
+        "image": "sdk-51"
       }
     },
     "preview": {
@@ -19,15 +20,16 @@
         "image": "expo-sdk-51"
       },
       "android": {
-        "image": "expo-sdk-51"
+        "image": "sdk-51"
       }
     },
     "production": {
+      "autoIncrement": true,
       "ios": {
         "image": "expo-sdk-51"
       },
       "android": {
-        "image": "expo-sdk-51"
+        "image": "sdk-51"
       }
     }
   },
