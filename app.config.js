@@ -34,10 +34,12 @@ export default {
     },
     "web": {
       "bundler": "metro",
-      "output": "server",
+      "output": "static",
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      ["@stripe/stripe-react-native", { merchantIdentifier: "merchant.placeholder" }],
+      "expo-asset",
       "expo-router",
       [
         "expo-splash-screen",

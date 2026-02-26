@@ -8,28 +8,28 @@
       "developmentClient": true,
       "distribution": "internal",
       "ios": {
-        "image": "sdk-51"
+        "image": "latest"
       },
       "android": {
-        "image": "sdk-51"
+        "image": "latest"
       }
     },
     "preview": {
       "distribution": "internal",
       "ios": {
-        "image": "sdk-51"
+        "image": "latest"
       },
       "android": {
-        "image": "sdk-51"
+        "image": "latest"
       }
     },
     "production": {
       "autoIncrement": true,
       "ios": {
-        "image": "sdk-51"
+        "image": "latest"
       },
       "android": {
-        "image": "sdk-51"
+        "image": "latest"
       }
     }
   },
