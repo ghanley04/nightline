@@ -29,6 +29,8 @@
     "@stripe/stripe-react-native": "0.38.6",
     "@teovilla/react-native-web-maps": "^0.9.5",
     "@types/react": "~18.3.12",
+    "ajv": "^8.12.0",
+    "ajv-keywords": "^5.1.0",
     "aws-amplify": "^6.15.5",
     "dotenv": "^17.3.1",
     "eslint-config-expo": "~8.0.1",
@@ -83,6 +85,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
+    "@babel/helpers": "^7.28.6",
     "@types/react": "~18.3.12",
     "@typescript-eslint/eslint-plugin": "^8.37.0",
     "@typescript-eslint/parser": "^8.37.0",

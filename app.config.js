@@ -2,7 +2,7 @@ import 'dotenv/config';
 
 export default {
   "expo": {
-    "name": "nightline-app",
+    "name": "Nightline",
     "slug": "nightline-app",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -11,6 +11,7 @@ export default {
     "userInterfaceStyle": "automatic",
     "newArchEnabled": false,
     "ios": {
+      "icon": "./assets/images/icon.png",
       "supportsTablet": true,
       "bundleIdentifier": "com.gghanley04.nightline-app",
       "infoPlist": {
