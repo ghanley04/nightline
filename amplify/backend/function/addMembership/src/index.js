@@ -7,9 +7,16 @@ const {
 } = require("@aws-sdk/client-dynamodb");
 const Stripe = require("stripe");
 const crypto = require("crypto");
+const {
+  CognitoIdentityProviderClient,
+  AdminUpdateUserAttributesCommand,
+} = require("@aws-sdk/client-cognito-identity-provider");
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY_TEST);
 const dynamo = new DynamoDBClient({});
+const cognito = new CognitoIdentityProviderClient({ region: "us-east-2" });
+
+const USER_POOL_ID = process.env.USER_POOL_ID; // set in Lambda environment variables
 
 // ✅ Helper: Only update if record exists
 async function updateIfExists({ table, key, update, values }) {
@@ -35,12 +42,11 @@ async function updateIfExists({ table, key, update, values }) {
   return true;
 }
 
-// ✅ NEW: Helper to cancel Stripe subscriptions for a customer
+// ✅ Helper to cancel Stripe subscriptions for a customer
 async function cancelStripeSubscriptions(customerId) {
   try {
     console.log(`🔍 Looking for active Stripe subscriptions for customer: ${customerId}`);
-    
-    // Don't try to cancel for guest customers
+
     if (customerId.startsWith('guest_')) {
       console.log('ℹ️ Guest customer, skipping Stripe subscription cancellation');
       return [];
@@ -53,7 +59,6 @@ async function cancelStripeSubscriptions(customerId) {
     });
 
     const canceledSubscriptionIds = [];
-
     for (const sub of subscriptions.data) {
       await stripe.subscriptions.cancel(sub.id);
       canceledSubscriptionIds.push(sub.id);
@@ -87,7 +92,6 @@ exports.handler = async (event) => {
 
   const sig = event.headers["stripe-signature"] || event.headers["Stripe-Signature"];
 
-  // Decode body if needed
   let bodyRaw = event.body;
   if (event.isBase64Encoded) {
     bodyRaw = Buffer.from(bodyRaw, "base64").toString("utf8");
@@ -119,7 +123,7 @@ exports.handler = async (event) => {
   const groupId = session.metadata?.groupId;
   const customerId = session.customer;
 
-  // Fetch the price details from Stripe to get max_members from metadata
+  // Fetch price metadata for max_members
   let maxSubscribers = "1";
   try {
     if (session.line_items?.data?.[0]?.price?.id) {
@@ -141,13 +145,12 @@ exports.handler = async (event) => {
     return { statusCode: 400, body: JSON.stringify({ error: "Missing metadata" }) };
   }
 
-  // 🔹 Determine if this is a one-time pass purchase (night or bus)
   const groupIdLower = groupId.toLowerCase();
   const isNightPass = groupIdLower.includes('night');
   const isBusPass = groupIdLower.includes('bus');
   const isOneTimePass = isNightPass || isBusPass;
 
-  // 🔹 For one-time payments, we need to retrieve the customer from payment_intent
+  // Resolve final customer ID
   let finalCustomerId = customerId;
   if (!finalCustomerId && session.payment_intent) {
     try {
@@ -159,10 +162,25 @@ exports.handler = async (event) => {
     }
   }
 
-  // 🔹 If still no customer, generate a placeholder (for one-time purchases without customer)
   if (!finalCustomerId) {
     finalCustomerId = `guest_${crypto.randomBytes(8).toString("hex")}`;
     console.log("⚠️ No Stripe customer found, using placeholder:", finalCustomerId);
+  }
+
+  // ✅ Save stripe_customer_id to Cognito user attributes
+  if (userId && finalCustomerId && !finalCustomerId.startsWith('guest_')) {
+    try {
+      await cognito.send(new AdminUpdateUserAttributesCommand({
+        UserPoolId: USER_POOL_ID,
+        Username: userId,
+        UserAttributes: [
+          { Name: 'custom:stripe_customer_id', Value: finalCustomerId },
+        ],
+      }));
+      console.log('✅ Saved stripe_customer_id to Cognito:', finalCustomerId);
+    } catch (err) {
+      console.error('⚠️ Failed to save stripe_customer_id to Cognito:', err.message);
+    }
   }
 
   const tableName = "GroupData-dev";
@@ -170,16 +188,14 @@ exports.handler = async (event) => {
   const createdAt = new Date().toISOString();
   const inviteCode = crypto.randomBytes(6).toString("hex");
   const inviteLink = `https://nightline.app/invite/${inviteCode}`;
-
   const newPlan = getPlanTier(groupId);
 
-  // Determine pass type for logging
   let passType = newPlan.type + ' (subscription)';
   if (isNightPass) passType = 'Night Pass (one-time)';
   if (isBusPass) passType = 'Bus Pass (one-time)';
 
   try {
-    // ✅ Query existing active memberships for this user (get ALL active memberships)
+    // Query existing active memberships
     const membershipsQuery = await dynamo.send(
       new QueryCommand({
         TableName: tableName,
@@ -194,10 +210,9 @@ exports.handler = async (event) => {
     );
 
     const activeMemberships = membershipsQuery.Items || [];
-
     console.log(`📋 Purchase type: ${passType}`);
 
-    // 🔹 Handle existing memberships
+    // Handle existing memberships
     for (const membership of activeMemberships) {
       const existingGroupId = membership.group_id.S;
       const existingPlan = getPlanTier(existingGroupId);
@@ -207,31 +222,20 @@ exports.handler = async (event) => {
       const isExistingOneTimePass = isExistingNightPass || isExistingBusPass;
       const existingStripeCustomerId = membership.stripe_customer_id?.S;
 
-      // Skip if it's the exact same group
-      if (existingGroupId === groupId) {
+      if (existingGroupId === groupId) continue;
+      if (isOneTimePass) {
+        console.log(`🎫 Purchasing ${isNightPass ? 'night' : 'bus'} pass - keeping existing membership: ${existingGroupId}`);
+        continue;
+      }
+      if (isExistingOneTimePass) {
+        console.log(`🎫 Keeping existing ${isExistingNightPass ? 'night' : 'bus'} pass: ${existingGroupId}`);
         continue;
       }
 
-      // 🎫 If purchasing a ONE-TIME PASS (night or bus): don't touch any existing memberships
-      if (isOneTimePass) {
-        console.log(`🎫 Purchasing ${isNightPass ? 'night' : 'bus'} pass - keeping existing membership: ${existingGroupId}`);
-        continue; // One-time passes coexist with everything
-      }
-
-      // 🎫 If existing membership is a ONE-TIME PASS: don't touch it when buying subscriptions
-      if (isExistingOneTimePass) {
-        console.log(`🎫 Keeping existing ${isExistingNightPass ? 'night' : 'bus'} pass: ${existingGroupId}`);
-        continue; // One-time passes are independent
-      }
-
-      // 💼 Handle subscription-to-subscription changes (individual/group/greek only)
       if (existingPlan.type === "individual" || existingPlan.type === "group" || existingPlan.type === "greek") {
-
-        // UPGRADING OR SAME-TIER REPLACEMENT: Deactivate old membership and cancel Stripe subscription
         if (newPlan.tier >= existingPlan.tier) {
           console.log(`⬆️ ${newPlan.tier > existingPlan.tier ? 'UPGRADING' : 'REPLACING'} from ${existingPlan.type} to ${newPlan.type}`);
 
-          // ✅ NEW: Cancel old Stripe subscriptions
           if (existingStripeCustomerId) {
             const canceledSubs = await cancelStripeSubscriptions(existingStripeCustomerId);
             console.log(`🔔 Canceled ${canceledSubs.length} Stripe subscription(s) for customer: ${existingStripeCustomerId}`);
@@ -244,7 +248,6 @@ exports.handler = async (event) => {
             values: { ":false": { BOOL: false }, ":now": { S: createdAt } },
           });
 
-          // Deactivate METADATA item
           await updateIfExists({
             table: tableName,
             key: { group_id: { S: existingGroupId }, group_data_members: { S: `METADATA` } },
@@ -252,7 +255,6 @@ exports.handler = async (event) => {
             values: { ":false": { BOOL: false }, ":now": { S: createdAt } },
           });
 
-          // Deactivate tokens for old membership (but NOT one-time passes)
           const oldTokensQuery = await dynamo.send(
             new QueryCommand({
               TableName: tokenTableName,
@@ -277,23 +279,18 @@ exports.handler = async (event) => {
               values: { ":false": { BOOL: false }, ":now": { S: createdAt } },
             });
           }
-        }
-        // DOWNGRADING: Update METADATA to decrease subscriber count
-        else if (newPlan.tier < existingPlan.tier) {
+        } else if (newPlan.tier < existingPlan.tier) {
           console.log(`⬇️ DOWNGRADING from ${existingPlan.type} to ${newPlan.type}`);
 
-          // ✅ NEW: Cancel old Stripe subscriptions on downgrade too
           if (existingStripeCustomerId) {
             const canceledSubs = await cancelStripeSubscriptions(existingStripeCustomerId);
             console.log(`🔔 Canceled ${canceledSubs.length} Stripe subscription(s) for customer: ${existingStripeCustomerId}`);
           }
 
-          // Get current metadata
           const currentMetadata = membership.metadata?.M || {};
           const currentMaxSubscribers = currentMetadata.max_subscribers?.S || "1";
           const newMaxSubscribers = String(Math.max(1, parseInt(currentMaxSubscribers) - 1));
 
-          // Update metadata with decreased subscriber count
           await updateIfExists({
             table: tableName,
             key: { group_id: { S: existingGroupId }, group_data_members: { S: `METADATA` } },
@@ -309,7 +306,7 @@ exports.handler = async (event) => {
       }
     }
 
-    // 🔹 Add new membership (MEMBER#USER# item) - works for subscriptions and one-time passes
+    // Add new membership
     await dynamo.send(
       new PutItemCommand({
         TableName: tableName,
@@ -325,12 +322,11 @@ exports.handler = async (event) => {
       })
     );
 
-    // 🔹 Determine plan type for metadata
     let planType = newPlan.type;
     if (isNightPass) planType = "night";
     if (isBusPass) planType = "bus";
 
-    // 🔹 Add/Update METADATA item (for subscriptions and one-time passes)
+    // Add METADATA
     await dynamo.send(
       new PutItemCommand({
         TableName: tableName,
@@ -341,12 +337,13 @@ exports.handler = async (event) => {
           update_at: { S: createdAt },
           active: { BOOL: true },
           max_subscribers: { S: isOneTimePass ? "1" : maxSubscribers },
-          plan_type: { S: planType }
+          plan_type: { S: planType },
+          stripe_customer_id: { S: finalCustomerId },
         },
       })
     );
 
-    // 🔹 Add new token (for subscriptions and one-time passes)
+    // Add token
     const tokenId = crypto.randomBytes(16).toString("hex");
     await dynamo.send(
       new PutItemCommand({
@@ -362,7 +359,7 @@ exports.handler = async (event) => {
       })
     );
 
-    // 🔹 Add invite code ONLY for group/greek membership (NOT for one-time passes or individual)
+    // Add invite code for group/greek only
     if (!isOneTimePass && (groupId.toLowerCase().includes("greek") || groupId.toLowerCase().includes("group"))) {
       await dynamo.send(
         new PutItemCommand({
@@ -376,6 +373,7 @@ exports.handler = async (event) => {
             used: { BOOL: false },
             invite_link: { S: inviteLink },
             active: { BOOL: true },
+            stripe_customer_id: { S: finalCustomerId },
           },
         })
       );

@@ -147,6 +147,18 @@
       "permissions": {
         "setting": "open"
       }
+    },
+    "/getDataAdmin": {
+      "name": "/getDataAdmin",
+      "lambdaFunction": "getDataAdmin",
+      "permissions": {
+        "setting": "private",
+        "auth": [
+          "read",
+          "update",
+          "delete"
+        ]
+      }
     }
   }
 }

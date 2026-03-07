@@ -119,6 +119,14 @@
           ],
           "category": "function",
           "resourceName": "InviteRedirect"
+        },
+        {
+          "attributes": [
+            "Name",
+            "Arn"
+          ],
+          "category": "function",
+          "resourceName": "getDataAdmin"
         }
       ],
       "providerPlugin": "awscloudformation",
@@ -203,6 +211,11 @@
       "service": "Lambda"
     },
     "fetchPlans": {
+      "build": true,
+      "providerPlugin": "awscloudformation",
+      "service": "Lambda"
+    },
+    "getDataAdmin": {
       "build": true,
       "providerPlugin": "awscloudformation",
       "service": "Lambda"
@@ -370,6 +383,22 @@
         {
           "category": "function",
           "resourceName": "fetchPlans"
+        }
+      ]
+    },
+    "AMPLIFY_function_getDataAdmin_deploymentBucketName": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "getDataAdmin"
+        }
+      ]
+    },
+    "AMPLIFY_function_getDataAdmin_s3Key": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "getDataAdmin"
         }
       ]
     },

@@ -36,9 +36,18 @@ export default function TabLayout() {
         <Tabs.Screen
           name="index"
           options={{
-            title: 'Add Membership',
+            title: 'Add Greek',
             tabBarIcon: ({ color, size }) => (
               <UserPlus size={size} color={color} />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="data"
+          options={{
+            title: 'Data',
+            tabBarIcon: ({ color, size }) => (
+              <User size={size} color={color} />
             ),
           }}
         />

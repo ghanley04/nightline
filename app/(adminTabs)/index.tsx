@@ -23,8 +23,9 @@ export default function ManualAddMembership() {
     lastName: '',
     email: '',
     phoneNumber: '',
-    groupId: 'greek-membership',
+    groupType: 'greek',
     maxSubscribers: '10',
+    stripeCustomerId: '',
   });
 
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -32,6 +33,7 @@ export default function ManualAddMembership() {
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [planType, setPlanType] = useState<string | null>(null);
+  const [generatedGroupId, setGeneratedGroupId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -55,16 +57,14 @@ export default function ManualAddMembership() {
     return cleaned.length === 10 || cleaned.length === 11;
   };
 
-  const isGroupOrGreek = () => {
-    const id = formData.groupId.toLowerCase();
-    return id.includes('group') || id.includes('greek');
-  };
+  const isGroupOrGreek = () =>
+    formData.groupType === 'group' || formData.groupType === 'greek';
 
-  const handleMembershipTypeChange = (newGroupId: string) => {
+  const handleMembershipTypeChange = (newGroupType: string) => {
     let defaultMax = '1';
-    if (newGroupId === 'group-membership') defaultMax = '5';
-    else if (newGroupId === 'greek-membership') defaultMax = '10';
-    setFormData({ ...formData, groupId: newGroupId, maxSubscribers: defaultMax });
+    if (newGroupType === 'group') defaultMax = '5';
+    else if (newGroupType === 'greek') defaultMax = '10';
+    setFormData({ ...formData, groupType: newGroupType, maxSubscribers: defaultMax });
   };
 
   const handleSubmit = async () => {
@@ -78,6 +78,10 @@ export default function ManualAddMembership() {
     }
     if (formData.phoneNumber && !validatePhone(formData.phoneNumber)) {
       Alert.alert('Error', 'Please enter a valid 10-digit phone number');
+      return;
+    }
+    if (!formData.stripeCustomerId.trim()) {
+      Alert.alert('Error', 'Please enter a Stripe Customer ID');
       return;
     }
     if (!currentUserId) {
@@ -100,20 +104,21 @@ export default function ManualAddMembership() {
         formattedPhone = cleaned.length === 10 ? `+1${cleaned}` : `+${cleaned}`;
       }
 
+      const body: Record<string, any> = {
+        userId: currentUserId,
+        email: formData.email.toLowerCase(),
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        phoneNumber: formattedPhone,
+        groupType: formData.groupType,
+        maxSubscribers: formData.maxSubscribers,
+        stripeCustomerId: formData.stripeCustomerId.trim(),
+      };
+
       const response = await post({
         apiName: 'apiNightline',
         path: '/manual-add-membership',
-        options: {
-          body: {
-            userId: currentUserId,
-            email: formData.email.toLowerCase(),
-            firstName: formData.firstName,
-            lastName: formData.lastName,
-            phoneNumber: formattedPhone,
-            groupId: formData.groupId,
-            maxSubscribers: formData.maxSubscribers,
-          },
-        },
+        options: { body },
       });
 
       const httpResponse = await response.response;
@@ -122,6 +127,8 @@ export default function ManualAddMembership() {
         inviteLink?: string;
         inviteCode?: string;
         planType?: string;
+        groupId?: string;
+        stripeCustomerId?: string;
         error?: string;
         message?: string;
       };
@@ -130,6 +137,7 @@ export default function ManualAddMembership() {
         setInviteLink(data.inviteLink || null);
         setInviteCode(data.inviteCode || null);
         setPlanType(data.planType || null);
+        setGeneratedGroupId(data.groupId || null);
 
         if (data.inviteLink) {
           Alert.alert(
@@ -180,18 +188,20 @@ export default function ManualAddMembership() {
       lastName: '',
       email: '',
       phoneNumber: '',
-      groupId: 'greek-membership',
+      groupType: 'greek',
       maxSubscribers: '10',
+      stripeCustomerId: '',
     });
     setInviteLink(null);
     setInviteCode(null);
     setPlanType(null);
+    setGeneratedGroupId(null);
   };
 
   const PLAN_TYPES = [
-    { id: 'individual-membership', label: 'Individual' },
-    { id: 'group-membership',      label: 'Group' },
-    { id: 'greek-membership',      label: 'Greek' },
+    { id: 'individual', label: 'Individual' },
+    { id: 'group',      label: 'Group' },
+    { id: 'greek',      label: 'Greek' },
   ];
 
   return (
@@ -202,7 +212,7 @@ export default function ManualAddMembership() {
         <Text style={styles.title}>Add Membership</Text>
         <Text style={styles.subtitle}>Create a membership and generate invite links for groups</Text>
 
-        {!inviteLink ? (
+        {!inviteLink && planType !== 'individual' ? (
           <View style={styles.form}>
 
             {/* Name row */}
@@ -259,12 +269,26 @@ export default function ManualAddMembership() {
               />
             </View>
 
+            {/* Stripe Customer ID - required */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Stripe Customer ID *</Text>
+              <TextInput
+                style={styles.input}
+                value={formData.stripeCustomerId}
+                onChangeText={(text) => setFormData({ ...formData, stripeCustomerId: text })}
+                placeholder="cus_XXXXXXXXXXXXXXXXX"
+                placeholderTextColor={colors.textMuted}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+
             {/* Membership Type */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Membership Type *</Text>
               <View style={styles.planTypeContainer}>
                 {PLAN_TYPES.map(({ id, label }) => {
-                  const active = formData.groupId === id;
+                  const active = formData.groupType === id;
                   return (
                     <TouchableOpacity
                       key={id}
@@ -327,6 +351,15 @@ export default function ManualAddMembership() {
             <Text style={styles.successSubtitle}>
               {formData.firstName} {formData.lastName}
             </Text>
+
+            {generatedGroupId && (
+              <View style={styles.infoCard}>
+                <View style={styles.infoTextContainer}>
+                  <Text style={styles.infoLabel}>Group ID</Text>
+                  <Text style={styles.infoValue}>{generatedGroupId}</Text>
+                </View>
+              </View>
+            )}
 
             {inviteLink && (
               <>
@@ -446,8 +479,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
     lineHeight: 16,
   },
-
-  // Plan type selector
   planTypeContainer: {
     flexDirection: 'row',
     gap: 8,
@@ -473,8 +504,6 @@ const styles = StyleSheet.create({
   planButtonTextActive: {
     color: colors.primary,
   },
-
-  // Submit
   submitButton: {
     backgroundColor: colors.primary,
     paddingVertical: 16,
@@ -496,8 +525,6 @@ const styles = StyleSheet.create({
     color: '#0A0A0F',
     letterSpacing: 0.3,
   },
-
-  // Success state
   successContainer: {
     alignItems: 'center',
     paddingVertical: 32,

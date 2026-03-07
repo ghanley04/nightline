@@ -5,6 +5,13 @@ const crypto = require("crypto");
 const client = new DynamoDBClient({});
 const dynamo = DynamoDBDocumentClient.from(client);
 
+// Helper: Generate a unique group ID matching stripeCheckout format
+function generateGroupId(type = 'group') {
+  const timestamp = Date.now().toString(36);
+  const random = Math.random().toString(36).substr(2, 6);
+  return `${type}_${timestamp}${random}`;
+}
+
 // Helper: Get plan tier for comparison
 function getPlanTier(groupId) {
   const id = groupId.toLowerCase();
@@ -43,38 +50,46 @@ async function updateIfExists({ table, key, update, values }) {
 exports.handler = async (event) => {
   console.log("📢 Received manual add membership event:", JSON.stringify(event, null, 2));
 
-  const { 
+  const {
     userId,
-    email, 
-    firstName, 
-    lastName, 
-    phoneNumber, 
-    groupId,
-    maxSubscribers = "200", // For group/greek plans
+    email,
+    firstName,
+    lastName,
+    phoneNumber,
+    groupType,           // ✅ now accepts groupType instead of groupId
+    maxSubscribers = "200",
+    stripeCustomerId: inputStripeCustomerId,
   } = JSON.parse(event.body || "{}");
-  
+
   const tableName = "GroupData-dev";
   const tokenTableName = "Tokens";
 
   // Validation
-  if (!userId || !email || !firstName || !lastName || !groupId) {
-    return { 
+  if (!userId || !email || !firstName || !lastName || !groupType) {
+    return {
       statusCode: 400,
       headers: { 'Access-Control-Allow-Origin': '*' },
-      body: JSON.stringify({ error: "Missing required fields: userId, email, firstName, lastName, groupId" }) 
+      body: JSON.stringify({ error: "Missing required fields: userId, email, firstName, lastName, groupType" })
     };
   }
 
   const createdAt = new Date().toISOString();
+
+  // ✅ Generate group ID the same way stripeCheckout does
+  const groupId = generateGroupId(groupType);
   const newPlan = getPlanTier(groupId);
-  
-  // Generate placeholder Stripe customer ID for manual additions
-  const stripeCustomerId = `manual_${crypto.randomBytes(8).toString("hex")}`;
+
+  // ✅ Use provided Stripe customer ID or generate a manual placeholder
+  const stripeCustomerId = inputStripeCustomerId
+    ? inputStripeCustomerId.trim()
+    : `manual_${crypto.randomBytes(8).toString("hex")}`;
 
   console.log(`📋 Manual membership type: ${newPlan.type}`);
+  console.log(`🆔 Generated group ID: ${groupId}`);
+  console.log(`💳 Stripe customer ID: ${stripeCustomerId}`);
 
   try {
-    // ✅ 1. Query existing active memberships for this user (same as Stripe webhook)
+    // 1. Query existing active memberships for this user
     const membershipsQuery = await dynamo.send(
       new QueryCommand({
         TableName: tableName,
@@ -91,7 +106,7 @@ exports.handler = async (event) => {
     const activeMemberships = membershipsQuery.Items || [];
     console.log(`📋 Found ${activeMemberships.length} active membership(s) for user ${userId}`);
 
-    // ✅ 2. Handle existing memberships (upgrade/downgrade/replace logic)
+    // 2. Handle existing memberships
     for (const membership of activeMemberships) {
       const existingGroupId = membership.group_id;
       const existingPlan = getPlanTier(existingGroupId);
@@ -100,26 +115,20 @@ exports.handler = async (event) => {
       const isExistingBusPass = existingGroupIdLower.includes('bus');
       const isExistingOneTimePass = isExistingNightPass || isExistingBusPass;
 
-      // Skip if it's the exact same group
       if (existingGroupId === groupId) {
         console.log(`ℹ️ User already has membership to ${groupId}, skipping duplicate`);
         continue;
       }
 
-      // 🎫 If existing membership is a ONE-TIME PASS: don't touch it
       if (isExistingOneTimePass) {
         console.log(`🎫 Keeping existing ${isExistingNightPass ? 'night' : 'bus'} pass: ${existingGroupId}`);
         continue;
       }
 
-      // 💼 Handle subscription-to-subscription changes (individual/group/greek only)
       if (existingPlan.type === "individual" || existingPlan.type === "group" || existingPlan.type === "greek") {
-
-        // UPGRADING OR SAME-TIER REPLACEMENT: Deactivate old membership
         if (newPlan.tier >= existingPlan.tier) {
           console.log(`⬆️ ${newPlan.tier > existingPlan.tier ? 'UPGRADING' : 'REPLACING'} from ${existingPlan.type} to ${newPlan.type}`);
 
-          // Deactivate member record
           await updateIfExists({
             table: tableName,
             key: { group_id: existingGroupId, group_data_members: `MEMBER#USER#${userId}` },
@@ -127,7 +136,6 @@ exports.handler = async (event) => {
             values: { ":false": false, ":now": createdAt },
           });
 
-          // Deactivate METADATA item
           await updateIfExists({
             table: tableName,
             key: { group_id: existingGroupId, group_data_members: `METADATA` },
@@ -135,7 +143,6 @@ exports.handler = async (event) => {
             values: { ":false": false, ":now": createdAt },
           });
 
-          // Deactivate tokens for old membership (but NOT one-time passes)
           const oldTokensQuery = await dynamo.send(
             new QueryCommand({
               TableName: tokenTableName,
@@ -160,12 +167,9 @@ exports.handler = async (event) => {
               values: { ":false": false, ":now": createdAt },
             });
           }
-        }
-        // DOWNGRADING: Update METADATA to decrease subscriber count
-        else if (newPlan.tier < existingPlan.tier) {
+        } else if (newPlan.tier < existingPlan.tier) {
           console.log(`⬇️ DOWNGRADING from ${existingPlan.type} to ${newPlan.type}`);
 
-          // Get current metadata
           const metadataResponse = await dynamo.send(
             new GetCommand({
               TableName: tableName,
@@ -177,15 +181,11 @@ exports.handler = async (event) => {
             const currentMaxSubscribers = parseInt(metadataResponse.Item.max_subscribers || "1");
             const newMaxSubscribers = Math.max(0, currentMaxSubscribers - 1);
 
-            // Update metadata with decreased subscriber count
             await updateIfExists({
               table: tableName,
               key: { group_id: existingGroupId, group_data_members: `METADATA` },
               update: "SET max_subscribers = :newMax, update_at = :now",
-              values: {
-                ":newMax": newMaxSubscribers,
-                ":now": createdAt
-              },
+              values: { ":newMax": newMaxSubscribers, ":now": createdAt },
             });
 
             console.log(`📉 Updated ${existingGroupId} max_subscribers: ${currentMaxSubscribers} → ${newMaxSubscribers}`);
@@ -194,7 +194,7 @@ exports.handler = async (event) => {
       }
     }
 
-    // ✅ 3. Add new membership (MEMBER#USER# item)
+    // 3. Add new membership (MEMBER#USER# item)
     await dynamo.send(new PutCommand({
       TableName: tableName,
       Item: {
@@ -209,45 +209,38 @@ exports.handler = async (event) => {
         created_at: createdAt,
         update_at: createdAt,
         active: true,
-        manually_added: true, // Flag to indicate this was manually added by admin
+        manually_added: true,
       },
     }));
 
     console.log(`✅ Added membership for user ${userId} to group ${groupId}`);
 
-    // ✅ 4. Check if METADATA already exists, create or update it
+    // 4. Check if METADATA already exists, create or update it
     const metadataCheck = await dynamo.send(new GetCommand({
       TableName: tableName,
-      Key: { 
-        group_id: groupId, 
-        group_data_members: "METADATA" 
-      }
+      Key: { group_id: groupId, group_data_members: "METADATA" }
     }));
 
     if (metadataCheck.Item) {
-      // METADATA exists, increment max_subscribers for group/greek
       if (newPlan.type === "group" || newPlan.type === "greek") {
         const currentMax = parseInt(metadataCheck.Item.max_subscribers || "0");
         const newMax = currentMax + parseInt(maxSubscribers);
 
         await dynamo.send(new UpdateCommand({
           TableName: tableName,
-          Key: { 
-            group_id: groupId, 
-            group_data_members: "METADATA" 
-          },
-          UpdateExpression: "SET max_subscribers = :newMax, update_at = :now, active = :true",
-          ExpressionAttributeValues: { 
+          Key: { group_id: groupId, group_data_members: "METADATA" },
+          UpdateExpression: "SET max_subscribers = :newMax, update_at = :now, active = :true, stripe_customer_id = :cid",
+          ExpressionAttributeValues: {
             ":newMax": newMax,
             ":now": createdAt,
-            ":true": true
+            ":true": true,
+            ":cid": stripeCustomerId,
           },
         }));
 
         console.log(`✅ Updated METADATA max_subscribers: ${currentMax} → ${newMax}`);
       }
     } else {
-      // METADATA doesn't exist, create it
       await dynamo.send(new PutCommand({
         TableName: tableName,
         Item: {
@@ -257,14 +250,15 @@ exports.handler = async (event) => {
           update_at: createdAt,
           active: true,
           max_subscribers: parseInt(maxSubscribers),
-          plan_type: newPlan.type
+          plan_type: newPlan.type,
+          stripe_customer_id: stripeCustomerId,
         },
       }));
 
       console.log(`✅ Created METADATA for ${groupId} with max_subscribers: ${maxSubscribers}`);
     }
 
-    // ✅ 5. Add new token for the user
+    // 5. Add new token for the user
     const tokenId = crypto.randomBytes(16).toString("hex");
     await dynamo.send(new PutCommand({
       TableName: tokenTableName,
@@ -280,7 +274,7 @@ exports.handler = async (event) => {
 
     console.log(`✅ Created token ${tokenId} for user ${userId}`);
 
-    // ✅ 6. Generate invite link ONLY for group/greek memberships
+    // 6. Generate invite link ONLY for group/greek memberships
     let inviteLink = null;
     let inviteCode = null;
 
@@ -299,11 +293,12 @@ exports.handler = async (event) => {
           used: false,
           invite_link: inviteLink,
           active: true,
-          max_uses: parseInt(maxSubscribers), // How many people can use this invite
+          max_uses: parseInt(maxSubscribers),
           current_uses: 0,
-          email: email, // Associate invite with the person it was created for
+          email: email,
           first_name: firstName,
           last_name: lastName,
+          stripe_customer_id: stripeCustomerId,
         },
       }));
 
@@ -312,31 +307,32 @@ exports.handler = async (event) => {
 
     console.log("✅ Successfully processed manual membership addition");
 
-    return { 
+    return {
       statusCode: 200,
       headers: { 'Access-Control-Allow-Origin': '*' },
-      body: JSON.stringify({ 
-        success: true, 
-        inviteLink: inviteLink,
-        inviteCode: inviteCode,
-        message: inviteLink 
+      body: JSON.stringify({
+        success: true,
+        inviteLink,
+        inviteCode,
+        stripeCustomerId,
+        groupId, // ✅ return generated groupId to caller
+        message: inviteLink
           ? `Membership created with invite link for ${maxSubscribers} subscriber(s)`
           : "Membership created successfully",
         planType: newPlan.type,
-        userId: userId,
-        groupId: groupId,
-      }) 
+        userId,
+      })
     };
 
   } catch (err) {
     console.error("❌ Error manually adding membership:", err);
-    return { 
+    return {
       statusCode: 500,
       headers: { 'Access-Control-Allow-Origin': '*' },
-      body: JSON.stringify({ 
+      body: JSON.stringify({
         error: "Internal server error",
-        details: err.message 
-      }) 
+        details: err.message
+      })
     };
   }
 };
