@@ -124,21 +124,21 @@ exports.handler = async (event) => {
   const customerId = session.customer;
 
   // Fetch price metadata for max_members
-  let maxSubscribers = "1";
+  let maxUsers = "1";
   try {
     if (session.line_items?.data?.[0]?.price?.id) {
       const priceId = session.line_items.data[0].price.id;
       const price = await stripe.prices.retrieve(priceId);
-      maxSubscribers = price.metadata?.max_members || "1";
-      console.log(`🔸 Retrieved max_members from price ${priceId}:`, maxSubscribers);
+      maxUsers = price.metadata?.max_members || "1";
+      console.log(`🔸 Retrieved max_members from price ${priceId}:`, maxUsers);
     } else {
-      console.log("⚠️ No line items found, defaulting max_subscribers to 1");
+      console.log("⚠️ No line items found, defaulting max_users to 1");
     }
   } catch (err) {
     console.error("⚠️ Error fetching price metadata, defaulting to 1:", err);
   }
 
-  console.log("🔸 Extracted metadata:", { userId, groupId, customerId, maxSubscribers });
+  console.log("🔸 Extracted metadata:", { userId, groupId, customerId, maxUsers });
 
   if (!userId || !groupId) {
     console.error("❌ Missing userId or groupId in metadata");
@@ -288,20 +288,20 @@ exports.handler = async (event) => {
           }
 
           const currentMetadata = membership.metadata?.M || {};
-          const currentMaxSubscribers = currentMetadata.max_subscribers?.S || "1";
-          const newMaxSubscribers = String(Math.max(1, parseInt(currentMaxSubscribers) - 1));
+          const currentMaxUsers = currentMetadata.max_users?.S || "1";
+          const newMaxUsers = String(Math.max(1, parseInt(currentMaxUsers) - 1));
 
           await updateIfExists({
             table: tableName,
             key: { group_id: { S: existingGroupId }, group_data_members: { S: `METADATA` } },
-            update: "SET metadata.max_subscribers = :newMax, update_at = :now",
+            update: "SET metadata.max_users = :newMax, update_at = :now",
             values: {
-              ":newMax": { S: newMaxSubscribers },
+              ":newMax": { S: newMaxUsers },
               ":now": { S: createdAt }
             },
           });
 
-          console.log(`📉 Updated ${existingGroupId} max_subscribers: ${currentMaxSubscribers} → ${newMaxSubscribers}`);
+          console.log(`📉 Updated ${existingGroupId} max_users: ${currentMaxUsers} → ${newMaxUsers}`);
         }
       }
     }
@@ -336,7 +336,7 @@ exports.handler = async (event) => {
           created_at: { S: createdAt },
           update_at: { S: createdAt },
           active: { BOOL: true },
-          max_subscribers: { S: isOneTimePass ? "1" : maxSubscribers },
+          max_users: { S: isOneTimePass ? "1" : maxUsers },
           plan_type: { S: planType },
           stripe_customer_id: { S: finalCustomerId },
         },

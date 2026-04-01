@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import * as Clipboard from 'expo-clipboard';
 import { get } from 'aws-amplify/api';
 import colors from '@/constants/colors';
 
@@ -27,7 +28,7 @@ interface GreekGroup {
   created_at: string;
   created_by: string;
   member_count: number;
-  stripe_customer_id: string;   // ✅ added
+  stripe_customer_id: string;
   cognito_user: CognitoUser | null;
 }
 
@@ -149,7 +150,7 @@ export default function DataScreen() {
                             <Row label="Name" value={group.cognito_user.name || '—'} />
                             <Row label="Email" value={group.cognito_user.email || '—'} />
                             <Row label="Phone" value={group.cognito_user.phone || '—'} />
-                            <Row label="Username" value={group.cognito_user.username} mono />
+                            <Row label="Username" value={group.cognito_user.username} mono copyable />
                             <Row label="Status" value={group.cognito_user.status || '—'} />
                             <Row label="Account Created" value={group.cognito_user.created_at ? new Date(group.cognito_user.created_at).toLocaleDateString() : '—'} />
                           </View>
@@ -159,19 +160,19 @@ export default function DataScreen() {
                       {/* Membership Info */}
                       <Text style={[styles.sectionLabel, { marginTop: 16 }]}>Membership</Text>
                       <View style={styles.infoGrid}>
-                        <Row label="Group ID" value={group.group_id} mono />
-                        <Row label="Stripe ID" value={group.stripe_customer_id || '—'} mono />
+                        <Row label="Group ID" value={group.group_id} mono copyable />
+                        <Row label="Stripe ID" value={group.stripe_customer_id || '—'} mono copyable />
                         <Row label="Max Uses" value={String(group.max_uses ?? '—')} />
                         <Row label="Current Uses" value={String(group.current_uses ?? '—')} />
-                        <Row label="Created By" value={group.created_by || '—'} mono />
+                        <Row label="Created By" value={group.created_by || '—'} mono copyable />
                         <Row label="Created" value={group.created_at ? new Date(group.created_at).toLocaleDateString() : '—'} />
                       </View>
 
                       {/* Invite Code */}
                       <Text style={[styles.sectionLabel, { marginTop: 16 }]}>Invite</Text>
                       <View style={styles.inviteCard}>
-                        <Row label="Code" value={group.invite_code} mono />
-                        <Row label="Link" value={group.invite_link} mono />
+                        <Row label="Code" value={group.invite_code} mono copyable />
+                        <Row label="Link" value={group.invite_link} mono copyable />
                         <Row label="Used" value={group.used ? 'Yes' : 'No'} />
                       </View>
 
@@ -187,13 +188,33 @@ export default function DataScreen() {
   );
 }
 
-function Row({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+function Row({ label, value, mono = false, copyable = false }: { label: string; value: string; mono?: boolean; copyable?: boolean }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    if (!copyable || value === '—') return;
+    await Clipboard.setStringAsync(value);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
   return (
     <View style={styles.row}>
       <Text style={styles.rowLabel}>{label}</Text>
-      <Text style={[styles.rowValue, mono && styles.rowValueMono]} numberOfLines={1} ellipsizeMode="middle">
-        {value}
-      </Text>
+      <TouchableOpacity
+        style={styles.rowValueWrapper}
+        onPress={handleCopy}
+        disabled={!copyable || value === '—'}
+        activeOpacity={copyable ? 0.6 : 1}
+      >
+        <Text
+          style={[styles.rowValue, mono && styles.rowValueMono, copied && styles.rowValueCopied]}
+          numberOfLines={1}
+          ellipsizeMode="middle"
+        >
+          {copied ? '✓ Copied' : value}
+        </Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -349,16 +370,24 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     flex: 1,
   },
+  rowValueWrapper: {
+    flex: 2,
+    alignItems: 'flex-end',
+  },
   rowValue: {
     fontSize: 13,
     color: colors.text,
     fontWeight: '400',
-    flex: 2,
     textAlign: 'right',
   },
   rowValueMono: {
     fontFamily: 'monospace',
     fontSize: 12,
+  },
+  rowValueCopied: {
+    color: '#22c55e',
+    fontFamily: undefined,
+    fontSize: 13,
   },
   inviteCard: {
     backgroundColor: colors.surfaceRaised,

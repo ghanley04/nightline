@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -14,11 +14,11 @@ import { StatusBar } from 'expo-status-bar';
 import { Check, Copy, Share2, Users } from 'lucide-react-native';
 import colors from '@/constants/colors';
 import { post } from 'aws-amplify/api';
-import { getCurrentUser } from 'aws-amplify/auth';
 import * as Clipboard from 'expo-clipboard';
 
 export default function ManualAddMembership() {
   const [formData, setFormData] = useState({
+    username: '',
     firstName: '',
     lastName: '',
     email: '',
@@ -28,25 +28,12 @@ export default function ManualAddMembership() {
     stripeCustomerId: '',
   });
 
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [planType, setPlanType] = useState<string | null>(null);
   const [generatedGroupId, setGeneratedGroupId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    async function loadUser() {
-      try {
-        const user = await getCurrentUser();
-        setCurrentUserId(user.userId);
-      } catch (err) {
-        Alert.alert('Error', 'Failed to load user information');
-      }
-    }
-    loadUser();
-  }, []);
 
   const validateEmail = (email: string) =>
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -64,32 +51,37 @@ export default function ManualAddMembership() {
     let defaultMax = '1';
     if (newGroupType === 'group') defaultMax = '5';
     else if (newGroupType === 'greek') defaultMax = '10';
-    setFormData({ ...formData, groupType: newGroupType, maxSubscribers: defaultMax });
+
+    setFormData({
+      ...formData,
+      groupType: newGroupType,
+      maxSubscribers: defaultMax,
+    });
   };
 
   const handleSubmit = async () => {
+    if (!formData.username.trim()) {
+      Alert.alert('Error', 'Please enter a username');
+      return;
+    }
+
     if (!formData.firstName.trim() || !formData.lastName.trim()) {
       Alert.alert('Error', 'Please enter first and last name');
       return;
     }
+
     if (!validateEmail(formData.email)) {
       Alert.alert('Error', 'Please enter a valid email address');
       return;
     }
+
     if (formData.phoneNumber && !validatePhone(formData.phoneNumber)) {
       Alert.alert('Error', 'Please enter a valid 10-digit phone number');
       return;
     }
-    if (!formData.stripeCustomerId.trim()) {
-      Alert.alert('Error', 'Please enter a Stripe Customer ID');
-      return;
-    }
-    if (!currentUserId) {
-      Alert.alert('Error', 'User ID not loaded. Please try again.');
-      return;
-    }
+
     if (isGroupOrGreek()) {
-      const maxSubs = parseInt(formData.maxSubscribers);
+      const maxSubs = parseInt(formData.maxSubscribers, 10);
       if (!formData.maxSubscribers || maxSubs < 1 || maxSubs > 100) {
         Alert.alert('Error', 'Please enter a valid number of subscribers (1-100)');
         return;
@@ -97,6 +89,7 @@ export default function ManualAddMembership() {
     }
 
     setLoading(true);
+
     try {
       let formattedPhone = null;
       if (formData.phoneNumber) {
@@ -105,15 +98,18 @@ export default function ManualAddMembership() {
       }
 
       const body: Record<string, any> = {
-        userId: currentUserId,
-        email: formData.email.toLowerCase(),
-        firstName: formData.firstName,
-        lastName: formData.lastName,
+        username: formData.username.trim(),
+        email: formData.email.toLowerCase().trim(),
+        firstName: formData.firstName.trim(),
+        lastName: formData.lastName.trim(),
         phoneNumber: formattedPhone,
         groupType: formData.groupType,
         maxSubscribers: formData.maxSubscribers,
-        stripeCustomerId: formData.stripeCustomerId.trim(),
       };
+
+      if (formData.stripeCustomerId.trim()) {
+        body.stripeCustomerId = formData.stripeCustomerId.trim();
+      }
 
       const response = await post({
         apiName: 'apiNightline',
@@ -122,7 +118,7 @@ export default function ManualAddMembership() {
       });
 
       const httpResponse = await response.response;
-      const data = await httpResponse.body.json() as {
+      const data = (await httpResponse.body.json()) as {
         success: boolean;
         inviteLink?: string;
         inviteCode?: string;
@@ -131,6 +127,7 @@ export default function ManualAddMembership() {
         stripeCustomerId?: string;
         error?: string;
         message?: string;
+        username?: string;
       };
 
       if (data.success) {
@@ -142,13 +139,13 @@ export default function ManualAddMembership() {
         if (data.inviteLink) {
           Alert.alert(
             'Success!',
-            `${data.planType === 'greek' ? 'Greek' : 'Group'} membership created for ${formData.firstName} ${formData.lastName}!\n\nShare the invite link with up to ${formData.maxSubscribers} members.`,
+            `${data.planType === 'greek' ? 'Greek' : 'Group'} membership created for ${formData.firstName} ${formData.lastName}.\n\nUser ID: ${formData.username}\n\nShare the invite link with up to ${formData.maxSubscribers} members.`,
             [{ text: 'OK' }]
           );
         } else {
           Alert.alert(
             'Success!',
-            `Individual membership created for ${formData.firstName} ${formData.lastName}`,
+            `Individual membership created for ${formData.firstName} ${formData.lastName}.\n\nUsername: ${formData.username}`,
             [{ text: 'OK' }]
           );
         }
@@ -184,6 +181,7 @@ export default function ManualAddMembership() {
 
   const resetForm = () => {
     setFormData({
+      username: '',
       firstName: '',
       lastName: '',
       email: '',
@@ -200,8 +198,8 @@ export default function ManualAddMembership() {
 
   const PLAN_TYPES = [
     { id: 'individual', label: 'Individual' },
-    { id: 'group',      label: 'Group' },
-    { id: 'greek',      label: 'Greek' },
+    { id: 'group', label: 'Group' },
+    { id: 'greek', label: 'Greek' },
   ];
 
   return (
@@ -211,11 +209,22 @@ export default function ManualAddMembership() {
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <Text style={styles.title}>Add Membership</Text>
         <Text style={styles.subtitle}>Create a membership and generate invite links for groups</Text>
-
+        {/* FIX: Change this to lookup by user ID instead of Username? */}
         {!inviteLink && planType !== 'individual' ? (
           <View style={styles.form}>
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>User ID (Username) *</Text>
+              <TextInput
+                style={styles.input}
+                value={formData.username}
+                onChangeText={(text) => setFormData({ ...formData, username: text })}
+                placeholder="gilly"
+                placeholderTextColor={colors.textMuted}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
 
-            {/* Name row */}
             <View style={styles.row}>
               <View style={[styles.inputGroup, { flex: 1 }]}>
                 <Text style={styles.label}>First Name *</Text>
@@ -241,7 +250,6 @@ export default function ManualAddMembership() {
               </View>
             </View>
 
-            {/* Email */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Email Address *</Text>
               <TextInput
@@ -256,7 +264,6 @@ export default function ManualAddMembership() {
               />
             </View>
 
-            {/* Phone */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Phone Number <Text style={styles.optional}>(optional)</Text></Text>
               <TextInput
@@ -269,9 +276,8 @@ export default function ManualAddMembership() {
               />
             </View>
 
-            {/* Stripe Customer ID - required */}
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Stripe Customer ID *</Text>
+              <Text style={styles.label}>Stripe Customer ID <Text style={styles.optional}>(optional)</Text></Text>
               <TextInput
                 style={styles.input}
                 value={formData.stripeCustomerId}
@@ -281,9 +287,11 @@ export default function ManualAddMembership() {
                 autoCapitalize="none"
                 autoCorrect={false}
               />
+              <Text style={styles.helperText}>
+                If provided, it must match the Cognito stripe customer ID when one already exists.
+              </Text>
             </View>
 
-            {/* Membership Type */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Membership Type *</Text>
               <View style={styles.planTypeContainer}>
@@ -305,7 +313,6 @@ export default function ManualAddMembership() {
               </View>
             </View>
 
-            {/* Max Subscribers */}
             <View style={styles.inputGroup}>
               <Text style={styles.label}>
                 {isGroupOrGreek() ? 'Number of Subscribers *' : 'Max Subscribers'}
@@ -313,7 +320,9 @@ export default function ManualAddMembership() {
               <TextInput
                 style={[styles.input, !isGroupOrGreek() && styles.inputDisabled]}
                 value={formData.maxSubscribers}
-                onChangeText={(text) => setFormData({ ...formData, maxSubscribers: text.replace(/[^0-9]/g, '') })}
+                onChangeText={(text) =>
+                  setFormData({ ...formData, maxSubscribers: text.replace(/[^0-9]/g, '') })
+                }
                 placeholder="Enter number (1-100)"
                 placeholderTextColor={colors.textMuted}
                 keyboardType="number-pad"
@@ -326,7 +335,6 @@ export default function ManualAddMembership() {
               </Text>
             </View>
 
-            {/* Submit */}
             <TouchableOpacity
               style={[styles.submitButton, loading && styles.submitButtonDisabled]}
               onPress={handleSubmit}
@@ -340,7 +348,6 @@ export default function ManualAddMembership() {
               )}
             </TouchableOpacity>
           </View>
-
         ) : (
           <View style={styles.successContainer}>
             <View style={styles.checkmarkContainer}>
@@ -385,9 +392,11 @@ export default function ManualAddMembership() {
                     onPress={handleCopyLink}
                     activeOpacity={0.8}
                   >
-                    {copied
-                      ? <Check size={18} color={colors.success} />
-                      : <Copy size={18} color={colors.text} />}
+                    {copied ? (
+                      <Check size={18} color={colors.success} />
+                    ) : (
+                      <Copy size={18} color={colors.text} />
+                    )}
                     <Text style={[styles.actionButtonText, copied && { color: colors.success }]}>
                       {copied ? 'Copied!' : 'Copy Link'}
                     </Text>

@@ -4,10 +4,11 @@ const {
   CognitoIdentityProviderClient,
   AdminGetUserCommand,
   AdminUpdateUserAttributesCommand,
+  ListUsersCommand,
 } = require('@aws-sdk/client-cognito-identity-provider');
 
 const cognito = new CognitoIdentityProviderClient({ region: 'us-east-2' });
-const USER_POOL_ID = process.env.USER_POOL_ID; // set in Lambda environment variables
+const USER_POOL_ID = process.env.USER_POOL_ID;
 
 exports.handler = async (event) => {
   try {
@@ -32,21 +33,30 @@ exports.handler = async (event) => {
     const { priceId, userId, groupType } = body || {};
     console.log('🔸 Final extracted values:', { priceId, userId, groupType });
 
-    // 1️⃣ Fetch Cognito user to get existing stripe_customer_id and email
+    // 1️⃣ Fetch Cognito user by sub (userId is the Cognito sub, not the username)
     let stripeCustomerId = null;
     let userEmail = null;
+    let cognitoUsername = null; // the actual username needed for AdminUpdateUserAttributes
 
     try {
-      const cognitoUser = await cognito.send(new AdminGetUserCommand({
+      const { ListUsersCommand } = require('@aws-sdk/client-cognito-identity-provider');
+      const listResult = await cognito.send(new ListUsersCommand({
         UserPoolId: USER_POOL_ID,
-        Username: userId,
+        Filter: `sub = "${userId}"`,
+        Limit: 1,
       }));
 
-      const attrs = {};
-      cognitoUser.UserAttributes.forEach(a => attrs[a.Name] = a.Value);
-      stripeCustomerId = attrs['custom:stripe_customer_id'] || null;
-      userEmail = attrs['email'] || null;
-      console.log('👤 Cognito user fetched. Existing stripe_customer_id:', stripeCustomerId);
+      const cognitoUser = listResult.Users?.[0];
+      if (cognitoUser) {
+        cognitoUsername = cognitoUser.Username;
+        const attrs = {};
+        cognitoUser.Attributes.forEach(a => attrs[a.Name] = a.Value);
+        stripeCustomerId = attrs['custom:stripe_customer_id'] || null;
+        userEmail = attrs['email'] || null;
+        console.log('👤 Cognito user found. Username:', cognitoUsername, '| Existing stripe_customer_id:', stripeCustomerId);
+      } else {
+        console.warn('⚠️ No Cognito user found for sub:', userId);
+      }
     } catch (err) {
       console.error('⚠️ Failed to fetch Cognito user:', err.message);
     }
@@ -61,17 +71,21 @@ exports.handler = async (event) => {
       stripeCustomerId = customer.id;
       console.log('✅ Created Stripe customer:', stripeCustomerId);
 
-      try {
-        await cognito.send(new AdminUpdateUserAttributesCommand({
-          UserPoolId: USER_POOL_ID,
-          Username: userId,
-          UserAttributes: [
-            { Name: 'custom:stripe_customer_id', Value: stripeCustomerId },
-          ],
-        }));
-        console.log('✅ Saved stripe_customer_id to Cognito:', stripeCustomerId);
-      } catch (err) {
-        console.error('⚠️ Failed to save stripe_customer_id to Cognito:', err.message);
+      if (cognitoUsername) {
+        try {
+          await cognito.send(new AdminUpdateUserAttributesCommand({
+            UserPoolId: USER_POOL_ID,
+            Username: cognitoUsername,
+            UserAttributes: [
+              { Name: 'custom:stripe_customer_id', Value: stripeCustomerId },
+            ],
+          }));
+          console.log('✅ Saved stripe_customer_id to Cognito:', stripeCustomerId);
+        } catch (err) {
+          console.error('⚠️ Failed to save stripe_customer_id to Cognito:', err.message);
+        }
+      } else {
+        console.warn('⚠️ No cognitoUsername available — cannot save stripe_customer_id to Cognito');
       }
     } else {
       console.log('♻️ Reusing existing Stripe customer:', stripeCustomerId);
@@ -87,25 +101,35 @@ exports.handler = async (event) => {
 
     // 4️⃣ Retrieve price and build line item
     const price = await stripe.prices.retrieve(priceId);
+    const isSubscription = !!price.recurring;
     const lineItem = { price: priceId };
     if (price.recurring?.usage_type !== 'metered') {
       lineItem.quantity = 1;
     }
 
-    // 5️⃣ Create Stripe Checkout session with existing/new customer
-    const session = await stripe.checkout.sessions.create({
+    // 5️⃣ Create Stripe Checkout session
+    const sessionParams = {
       customer: stripeCustomerId,
-      mode: price.recurring ? 'subscription' : 'payment',
+      mode: isSubscription ? 'subscription' : 'payment',
       payment_method_types: ['card'],
       line_items: [lineItem],
-      success_url: `nightlineapp://payment/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `nightlineapp://payment/cancel`,
+      success_url: `https://nightline.app/payment/success?session_id={CHECKOUT_SESSION_ID}&status=success`,
+      cancel_url: `https://nightline.app/payment/cancel?status=cancel`,
       metadata: {
         userId,
         groupId,
         groupType,
       },
-    });
+    };
+
+    // ✅ In payment mode, Stripe does NOT attach the customer to the session by default.
+    // customer_update forces it to save the payment method to the customer object,
+    // which also ensures session.customer is populated in the webhook.
+    if (!isSubscription) {
+      sessionParams.customer_update = { name: 'auto' };
+    }
+
+    const session = await stripe.checkout.sessions.create(sessionParams);
 
     console.log('✅ Stripe session created:', session.id);
 

@@ -7,6 +7,7 @@ exports.handler = async () => {
     const prices = await stripe.prices.list({
       active: true,
       expand: ['data.product'],
+      limit: 100,
     });
 
     // Simplify structure

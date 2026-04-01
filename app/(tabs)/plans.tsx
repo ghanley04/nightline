@@ -1,184 +1,136 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Modal, KeyboardAvoidingView, Platform } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Modal, KeyboardAvoidingView, Platform, TextInput } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as WebBrowser from 'expo-web-browser';
+import * as Linking from 'expo-linking';
 import Button from '@/components/Button';
 import colors from '@/constants/colors';
-import { getCurrentUser } from 'aws-amplify/auth';
+import { getCurrentUser, fetchUserAttributes } from 'aws-amplify/auth';
 import { get, post } from 'aws-amplify/api';
 import { Plan } from '../interfaces/plan';
 import { MembershipResponse, InviteResponse } from '../interfaces/interface';
 import { useAuthenticator } from '@aws-amplify/ui-react-native';
-import { getJwtToken } from "../auth/auth";
 import { useFocusEffect } from '@react-navigation/native';
-import { TextInput } from 'react-native';
 
 export default function SubscriptionPlansScreen() {
   const [plans, setPlans] = useState<Plan[]>([]);
+  const [plansLoading, setPlansLoading] = useState(true);
+  const [membershipsLoading, setMembershipsLoading] = useState(true);
   const [groupId, setGroupId] = useState<string | null>(null);
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<'one-time' | 'subscription'>('subscription');
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [loadingPlanId, setLoadingPlanId] = useState<string | null>(null);
-  const [hasGroup, setHasGroup] = useState(false);
-  const [hasIndividual, setHasIndividual] = useState(false);
-  const [hasGreek, setHasGreek] = useState(false);
-  const [hasOther, setHasOther] = useState(false);
   const { user } = useAuthenticator(ctx => [ctx.user]);
-  const [hasNight, setHasNight] = useState(false);
-  const [hasBus, setHasBus] = useState(false);
   const [inviteCode, setInviteCode] = useState<string>('');
   const [inviteModalVisible, setInviteModalVisible] = useState(false);
 
-  useEffect(() => {
-    const fetchPlans = async () => {
-      console.log('📋 [FETCH_PLANS] Starting to fetch plans...');
-      try {
-        const rawData = await get({
-          apiName: 'apiNightline',
-          path: '/get-plans',
-          options: {},
-        });
-        console.log('📋 [FETCH_PLANS] Raw data received');
-        const { body } = await rawData.response;
-        const data = await body.json();
-        console.log('📋 [FETCH_PLANS] Data parsed:', data);
+  const [membershipFlags, setMembershipFlags] = useState({
+    hasGroup: false,
+    hasIndividual: false,
+    hasGreek: false,
+    hasOther: false,
+    hasNight: false,
+    hasBus: false,
+  });
 
-        const newdata = data as unknown as Plan[];
-        console.log('📋 [FETCH_PLANS] Plans count:', newdata.length);
-
-        setPlans(newdata);
-        console.log('📋 [FETCH_PLANS] Plans state updated successfully');
-      } catch (err) {
-        console.error('❌ [FETCH_PLANS] Error fetching plans:', err);
-        console.error('❌ [FETCH_PLANS] Error details:', JSON.stringify(err, null, 2));
-      } finally {
-        setIsLoading(false);
-        console.log('📋 [FETCH_PLANS] Finished (loading set to false)');
-      }
-    };
-
-    fetchPlans();
+  const fetchPlans = useCallback(async () => {
+    try {
+      setPlansLoading(true);
+      const rawData = await get({ apiName: 'apiNightline', path: '/get-plans', options: {} });
+      const { body } = await rawData.response;
+      const data = await body.json();
+      setPlans(data as unknown as Plan[]);
+    } catch (err) {
+      console.error('❌ [FETCH_PLANS] Error fetching plans:', err);
+    } finally {
+      setPlansLoading(false);
+    }
   }, []);
 
   const fetchMembershipTokens = useCallback(async () => {
-    console.log('🎫 [FETCH_MEMBERSHIP] Starting...');
-    const token = await getJwtToken();
-    console.log('🎫 [FETCH_MEMBERSHIP] JWT token obtained');
-
-    if (!user) {
-      console.log('🎫 [FETCH_MEMBERSHIP] No user found, exiting');
-      setIsLoading(false);
+    if (!user?.userId) {
+      setMembershipFlags({
+        hasGroup: false,
+        hasIndividual: false,
+        hasGreek: false,
+        hasOther: false,
+        hasNight: false,
+        hasBus: false,
+      });
+      setMembershipsLoading(false);
       return;
     }
-    console.log("🎫 [FETCH_MEMBERSHIP] Checking User:", user.userId);
 
     try {
-      console.log('🎫 [FETCH_MEMBERSHIP] Making API call...');
+      setMembershipsLoading(true);
+
       const response = await get({
         apiName: "apiNightline",
         path: "/fetchMembership",
-        options: {
-          queryParams: { userId: user.userId },
-        },
+        options: { queryParams: { userId: user.userId } },
       });
 
-      console.log('🎫 [FETCH_MEMBERSHIP] Response received');
       const { body } = await response.response;
-      const rawData = await body.json();
+      const data = (await body.json()) as unknown as MembershipResponse;
 
-      console.log('🎫 [FETCH_MEMBERSHIP] Raw data:', rawData);
-      const data = rawData as unknown as MembershipResponse;
+      const nextFlags = {
+        hasGroup: false,
+        hasIndividual: false,
+        hasGreek: false,
+        hasOther: false,
+        hasNight: false,
+        hasBus: false,
+      };
 
-      if (data.hasMembership && data.tokens && data.tokens.length > 0) {
-        console.log('🎫 [FETCH_MEMBERSHIP] Processing', data.tokens.length, 'tokens');
-
-        data.tokens.forEach((t, i) => {
-          const groupId = t.group_id.toLowerCase();
-          console.log(`🎫 [FETCH_MEMBERSHIP] Token ${i}: ${groupId}`);
-
-          if (groupId.startsWith("group")) {
-            console.log('🎫 [FETCH_MEMBERSHIP] Setting hasGroup = true');
-            setHasGroup(true);
-          }
-          if (groupId.startsWith("individual")) {
-            console.log('🎫 [FETCH_MEMBERSHIP] Setting hasIndividual = true');
-            setHasIndividual(true);
-          }
-          if (groupId.startsWith("greek")) {
-            console.log('🎫 [FETCH_MEMBERSHIP] Setting hasGreek = true');
-            setHasGreek(true);
-          }
-          if (groupId.startsWith("night")) {
-            console.log('🎫 [FETCH_MEMBERSHIP] Setting hasNight = true');
-            setHasNight(true);
-          }
-          if (groupId.startsWith("bus")) {
-            console.log('🎫 [FETCH_MEMBERSHIP] Setting hasBus = true');
-            setHasBus(true);
-          } else {
-            console.log('🎫 [FETCH_MEMBERSHIP] Setting hasOther = true');
-            setHasOther(true);
-          }
+      if (data.hasMembership && data.tokens?.length) {
+        data.tokens.forEach((t) => {
+          const gid = t.group_id.toLowerCase();
+          if (gid.startsWith("group")) nextFlags.hasGroup = true;
+          else if (gid.startsWith("individual")) nextFlags.hasIndividual = true;
+          else if (gid.startsWith("greek")) nextFlags.hasGreek = true;
+          else if (gid.startsWith("night")) nextFlags.hasNight = true;
+          else if (gid.startsWith("bus")) nextFlags.hasBus = true;
+          else nextFlags.hasOther = true;
         });
-      } else {
-        console.log('🎫 [FETCH_MEMBERSHIP] No valid tokens, resetting all flags');
-        setHasGreek(false);
-        setHasGroup(false);
-        setHasIndividual(false);
-        setHasNight(false);
-        setHasBus(false);
-        setHasOther(false);
       }
 
-      console.log('🎫 [FETCH_MEMBERSHIP] Completed successfully');
+      setMembershipFlags(nextFlags);
     } catch (err) {
       console.error('❌ [FETCH_MEMBERSHIP] Error:', err);
-      console.error('❌ [FETCH_MEMBERSHIP] Error details:', JSON.stringify(err, null, 2));
+    } finally {
+      setMembershipsLoading(false);
     }
-  }, [user]);
+  }, [user?.userId]);
 
   useEffect(() => {
-    console.log('🔄 [EFFECT] User changed, fetching membership tokens');
+    fetchPlans();
+  }, [fetchPlans]);
+
+  useEffect(() => {
     fetchMembershipTokens();
-  }, [user]);
+  }, [fetchMembershipTokens]);
 
   useFocusEffect(
     useCallback(() => {
-      console.log('📱 [FOCUS] Plans screen focused, refreshing membership...');
       fetchMembershipTokens();
     }, [fetchMembershipTokens])
   );
 
   const checkSubscriptionConflict = (planName: string): { hasConflict: boolean; message: string } => {
-    const lowerPlanName = planName.toLowerCase();
+    const n = planName.toLowerCase();
 
-    if (lowerPlanName.includes('individual') && hasIndividual) {
-      return {
-        hasConflict: true,
-        message: 'You already have an Individual subscription. Subscribing to this plan will replace your current Individual subscription.'
-      };
+    if (n.includes('individual') && membershipFlags.hasIndividual) {
+      return { hasConflict: true, message: 'You already have an Individual subscription. Subscribing to this plan will replace your current Individual subscription.' };
     }
-
-    if (lowerPlanName.includes('group') && hasGroup) {
-      return {
-        hasConflict: true,
-        message: 'You already have a Group subscription. Subscribing to this plan will replace your current Group subscription.'
-      };
+    if (n.includes('group') && membershipFlags.hasGroup) {
+      return { hasConflict: true, message: 'You already have a Group subscription. Subscribing to this plan will replace your current Group subscription.' };
     }
-
-    if (lowerPlanName.includes('individual') && hasGroup) {
-      return {
-        hasConflict: true,
-        message: 'You currently have a Group subscription. Switching to Individual will cancel your Group subscription and all members will lose access.'
-      };
+    if (n.includes('individual') && membershipFlags.hasGroup) {
+      return { hasConflict: true, message: 'You currently have a Group subscription. Switching to Individual will cancel your Group subscription and all members will lose access.' };
     }
-
-    if (lowerPlanName.includes('group') && hasIndividual) {
-      return {
-        hasConflict: true,
-        message: 'You currently have an Individual subscription. Switching to Group will cancel your Individual subscription.'
-      };
+    if (n.includes('group') && membershipFlags.hasIndividual) {
+      return { hasConflict: true, message: 'You currently have an Individual subscription. Switching to Group will cancel your Individual subscription.' };
     }
 
     return { hasConflict: false, message: '' };
@@ -188,27 +140,10 @@ export default function SubscriptionPlansScreen() {
     const conflict = checkSubscriptionConflict(planName);
 
     if (conflict.hasConflict) {
-      Alert.alert(
-        'Subscription Change',
-        conflict.message + '\n\nDo you want to continue?',
-        [
-          {
-            text: 'Cancel',
-            style: 'cancel',
-            onPress: () => {
-              console.log('💳 [CHECKOUT] User cancelled due to subscription conflict');
-            }
-          },
-          {
-            text: 'Continue',
-            style: 'destructive',
-            onPress: () => {
-              console.log('💳 [CHECKOUT] User accepted subscription change');
-              proceedWithCheckout(priceId, planName);
-            }
-          }
-        ]
-      );
+      Alert.alert('Subscription Change', conflict.message + '\n\nDo you want to continue?', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Continue', style: 'destructive', onPress: () => proceedWithCheckout(priceId, planName) },
+      ]);
       return;
     }
 
@@ -220,74 +155,56 @@ export default function SubscriptionPlansScreen() {
       setIsLoading(true);
       setLoadingPlanId(priceId);
 
-      const user = await getCurrentUser();
-      const userId = user.userId;
+      const currentUser = await getCurrentUser();
+      if (!priceId) throw new Error("priceId is required but was not provided");
 
-      if (!priceId) {
-        throw new Error("priceId is required but was not provided");
-      }
-
+      const n = planName.toLowerCase();
       let groupType = 'individual';
-      const lowerPlanName = planName.toLowerCase();
 
-      if (lowerPlanName.includes('greek')) {
-        groupType = 'greek';
-      } else if (lowerPlanName.includes('group')) {
-        groupType = 'group';
-      } else if (lowerPlanName.includes('night') || lowerPlanName.includes('pass')) {
-        groupType = 'night';
-      } else if (lowerPlanName.includes('bus')) {
-        groupType = 'bus';
-      }
+      if (n.includes('greek')) groupType = 'greek';
+      else if (n.includes('group')) groupType = 'group';
+      else if (n.includes('night') || n.includes('pass')) groupType = 'night';
+      else if (n.includes('bus')) groupType = 'bus';
 
       const response = await post({
         apiName: "apiNightline",
         path: "/create-checkout-session",
         options: {
-          body: { priceId, userId, groupType },
+          body: { priceId, userId: currentUser.userId, groupType },
           headers: { "Content-Type": "application/json" },
         },
       });
 
-      const httpResponse = await response.response;
-      const text = await httpResponse.body.text();
+      const text = await (await response.response).body.text();
 
       let data;
       try {
         data = JSON.parse(text);
-      } catch (parseError) {
+      } catch {
         throw new Error("Invalid response from server");
       }
 
-      if (!data.url) {
-        throw new Error("No checkout URL received from server");
-      }
+      if (!data.url) throw new Error("No checkout URL received from server");
 
       setGroupId(data.groupId);
 
-      const result = await WebBrowser.openBrowserAsync(data.url, {
+      const redirectUrl = Linking.createURL('/');
+      const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl, {
         presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET,
         controlsColor: colors.primary,
         toolbarColor: colors.secondary,
       });
 
-      if (result.type === 'dismiss' || result.type === 'cancel') {
+      if (result.type === 'success' || result.type === 'dismiss' || result.type === 'cancel') {
         await fetchMembershipTokens();
 
-        if (data.groupId &&
-          (data.groupId.toLowerCase().includes("group") ||
-            data.groupId.toLowerCase().includes("greek"))) {
+        if (data.groupId && (data.groupId.toLowerCase().includes("group") || data.groupId.toLowerCase().includes("greek"))) {
           await fetchInviteLink(data.groupId);
         }
       }
-
     } catch (error) {
       const err = error as any;
-      Alert.alert(
-        "Subscription Error",
-        `Unable to start checkout process. ${err?.message || 'Unknown error'}`,
-        [{ text: "OK" }]
-      );
+      Alert.alert("Subscription Error", `Unable to start checkout process. ${err?.message || 'Unknown error'}`, [{ text: "OK" }]);
     } finally {
       setIsLoading(false);
       setLoadingPlanId(null);
@@ -296,31 +213,22 @@ export default function SubscriptionPlansScreen() {
 
   const fetchInviteLink = async (targetGroupId?: string) => {
     const gId = targetGroupId || groupId;
-    if (!gId) return;
-    if (!gId.toLowerCase().includes("group") && !gId.toLowerCase().includes("greek")) return;
+    if (!gId || (!gId.toLowerCase().includes("group") && !gId.toLowerCase().includes("greek"))) return;
 
     try {
       const operation = await get({
         apiName: "apiNightline",
         path: "/get-invite-link",
-        options: {
-          queryParams: { groupId: gId },
-        },
+        options: { queryParams: { groupId: gId } },
       });
 
-      const { body } = await operation.response;
-      const data = (await body.json()) as InviteResponse;
+      const data = (await (await operation.response).body.json()) as InviteResponse;
 
       if (data.inviteLink) {
         setInviteLink(data.inviteLink);
-        Alert.alert(
-          "Group Created!",
-          `Share this link with your group members:\n\n${data.inviteLink}`,
-          [
-            { text: "Copy Link", onPress: () => console.log('📋 [INVITE] Link copied') },
-            { text: "OK" }
-          ]
-        );
+        Alert.alert("Group Created!", `Share this link with your group members:\n\n${data.inviteLink}`, [
+          { text: "OK" },
+        ]);
       }
     } catch (e) {
       console.error('❌ [INVITE] Error fetching invite link:', e);
@@ -335,49 +243,112 @@ export default function SubscriptionPlansScreen() {
 
     try {
       setIsLoading(true);
+
       const currentUser = await getCurrentUser();
+      const attributes = await fetchUserAttributes();
+
+      const requestBody = {
+        inviteCode,
+        userId: currentUser.userId,
+        userName: currentUser.username,
+        email: attributes.email ?? null,
+        phoneNumber: attributes.phone_number ?? null,
+      };
+
+      console.log('📤 [INVITE] request body:', JSON.stringify(requestBody, null, 2));
+
       const response = await post({
         apiName: 'apiNightline',
-        path: '/acceptInvite',
-        options: {
-          body: {
-            groupId: inviteCode,
-            userId: currentUser.userId,
-            userName: currentUser.username,
-            email: currentUser.attributes?.email ?? null,
-            phoneNumber: currentUser.attributes?.phone_number ?? null,
-          },
-        },
+        path: '/accept-invite',
+        options: { body: requestBody },
       });
 
-      const { body } = await response.response;
-      const result = await body.json() as { alreadyMember?: boolean, success?: boolean, message?: string };
+      const httpResponse = await response.response;
+      const rawText = await httpResponse.body.text();
+      const result = JSON.parse(rawText) as {
+        alreadyMember?: boolean;
+        success?: boolean;
+        message?: string;
+        error?: string;
+      };
+
+      if (!result.success && !result.alreadyMember) {
+        throw new Error(result.error || result.message || 'Join invite failed');
+      }
 
       Alert.alert(
-        result.alreadyMember ? "Already a Member" : "Joined Successfully",
-        result.alreadyMember
-          ? "You're already in this group."
-          : "You've successfully joined the group!"
+        result.alreadyMember ? 'Already a Member' : 'Joined Successfully',
+        result.alreadyMember ? "You're already in this group." : "You've successfully joined the group!"
       );
 
       await fetchMembershipTokens();
       setInviteCode('');
       setInviteModalVisible(false);
-    } catch (err) {
+    } catch (err: any) {
       console.error('❌ [INVITE] Error joining invite:', err);
-      Alert.alert('Error', 'Failed to join invite. Please check the code and try again.');
+
+      let errorMessage = err?.message || 'Failed to join invite. Please check the code and try again.';
+
+      if (err?._response?.body) {
+        try {
+          const parsed =
+            typeof err._response.body === 'string'
+              ? JSON.parse(err._response.body)
+              : err._response.body;
+          errorMessage = parsed.error || parsed.message || parsed.details || errorMessage;
+        } catch {}
+      }
+
+      Alert.alert('Error', errorMessage);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const filteredPlans = plans.filter(
-    (plan) =>
-      plan.active &&
-      (selectedType === 'one-time' ? plan.interval === 'one-time' : plan.interval !== 'one-time')
-  );
+  const renderPlanAction = (plan: Plan) => {
+    const n = plan.name.toLowerCase();
+    const isGreekPlan = n.includes('greek');
+    const isNightOrBus = n.includes('night') || n.includes('bus');
 
-  if (isLoading && plans.length === 0) {
+    if (isGreekPlan) {
+      return membershipFlags.hasGreek
+        ? <Text style={styles.alreadyHaveText}>You already have this plan.</Text>
+        : <Text style={styles.contactAdminText}>Contact your admin to subscribe to this plan.</Text>;
+    }
+
+    const alreadyHasThisPlan = !isNightOrBus && (
+      (n.includes('individual') && membershipFlags.hasIndividual) ||
+      (n.includes('group') && membershipFlags.hasGroup)
+    );
+
+    if (alreadyHasThisPlan) {
+      return <Text style={styles.alreadyHaveText}>You already have this plan.</Text>;
+    }
+
+    return (
+      <Button
+        title={loadingPlanId === plan.id ? "Loading..." : n.includes('night') ? "Buy Pass" : n.includes('bus') ? "Request Rental" : "Subscribe"}
+        onPress={() => { if (!isLoading) createCheckoutSession(plan.id, plan.name); }}
+        disabled={isLoading}
+      />
+    );
+  };
+
+  const filteredPlans = useMemo(() => {
+    return plans.filter((plan) => {
+      if (!plan.active) return false;
+      const isGreekPlan = plan.name.toLowerCase().includes('greek');
+
+      if (selectedType === 'one-time') {
+        if (isGreekPlan) return false;
+        return plan.interval === 'one-time';
+      }
+
+      return plan.interval !== 'one-time';
+    });
+  }, [plans, selectedType]);
+
+  if (plansLoading || membershipsLoading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={colors.primary} />
@@ -390,74 +361,42 @@ export default function SubscriptionPlansScreen() {
     <View style={styles.container}>
       <StatusBar style="dark" />
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 80 }}>
         <View style={styles.topBar}>
           <TouchableOpacity
             style={[styles.tabButton, selectedType === 'one-time' && styles.tabButtonActive]}
             onPress={() => setSelectedType('one-time')}
           >
-            <Text style={selectedType === 'one-time' ? styles.tabTextActive : styles.tabText}>
-              One-Time
-            </Text>
+            <Text style={selectedType === 'one-time' ? styles.tabTextActive : styles.tabText}>One-Time</Text>
           </TouchableOpacity>
-
           <TouchableOpacity
             style={[styles.tabButton, selectedType === 'subscription' && styles.tabButtonActive]}
             onPress={() => setSelectedType('subscription')}
           >
-            <Text style={selectedType === 'subscription' ? styles.tabTextActive : styles.tabText}>
-              Subscription
-            </Text>
+            <Text style={selectedType === 'subscription' ? styles.tabTextActive : styles.tabText}>Subscription</Text>
           </TouchableOpacity>
         </View>
 
         <View style={styles.planList}>
-          {filteredPlans.map((plan, index) => (
+          {filteredPlans.map((plan) => (
             <View key={plan.id} style={styles.planCard}>
               <View style={styles.planHeader}>
                 <Text style={styles.planTitle}>{plan.name}</Text>
-                <Text style={styles.planPrice}>
-                  {plan.amount} {plan.currency} / {plan.interval}
-                </Text>
+                <Text style={styles.planPrice}>{plan.amount} {plan.currency} / {plan.interval}</Text>
               </View>
               <View style={styles.planContent}>
                 <Text style={styles.planDescription}>{plan.description}</Text>
-                {plan.name.toLowerCase().includes('greek') ? (
-                  hasGreek ? (
-                    <Text style={{ color: 'gray', marginTop: 8 }}>You already have this plan.</Text>
-                  ) : (
-                    <Text style={{ color: 'gray', marginTop: 8 }}>Contact your admin to subscribe to this plan.</Text>
-                  )
-                ) : (
-                  hasGreek ? (
-                    <Text style={{ color: 'gray', marginTop: 8 }}>You already have this plan.</Text>
-                  ) : (
-                    <Button
-                      title={loadingPlanId === plan.id ? "Loading..." :
-                        plan.name.toLowerCase().includes('night') ? "Buy Pass" :
-                          plan.name.toLowerCase().includes('bus') ? "Request Rental" : "Subscribe"}
-                      onPress={() => {
-                        if (!isLoading) createCheckoutSession(plan.id, plan.name);
-                      }}
-                      disabled={isLoading}
-                    />
-                  )
-                )}
+                {renderPlanAction(plan)}
               </View>
             </View>
           ))}
         </View>
 
-        {/* Invite link */}
-        <TouchableOpacity
-          style={styles.inviteLink}
-          onPress={() => setInviteModalVisible(true)}
-        >
+        <TouchableOpacity style={styles.inviteLink} onPress={() => setInviteModalVisible(true)}>
           <Text style={styles.inviteLinkText}>Have an invite code?</Text>
         </TouchableOpacity>
       </ScrollView>
 
-      {/* Invite Code Modal */}
       <Modal
         visible={inviteModalVisible}
         transparent
@@ -508,18 +447,9 @@ export default function SubscriptionPlansScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: colors.background,
-  },
+  container: { flex: 1, backgroundColor: colors.background },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background },
 
-  // Tab switcher
   topBar: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -540,26 +470,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.surfaceBorder,
   },
-  tabButtonActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  tabText: {
-    color: colors.textSecondary,
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  tabTextActive: {
-    color: '#0A0A0F',
-    fontWeight: '700',
-    fontSize: 14,
-  },
+  tabButtonActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  tabText: { color: colors.textSecondary, fontWeight: '600', fontSize: 14 },
+  tabTextActive: { color: '#0A0A0F', fontWeight: '700', fontSize: 14 },
 
-  // Plans list
-  planList: {
-    padding: 20,
-    gap: 16,
-  },
+  planList: { padding: 20, gap: 16 },
   planCard: {
     borderRadius: 16,
     backgroundColor: colors.surface,
@@ -583,41 +498,16 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 16,
   },
-  planTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: colors.primary,
-  },
-  planPrice: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textSecondary,
-  },
-  planContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-  },
-  planDescription: {
-    paddingVertical: 14,
-    color: colors.textSecondary,
-    fontSize: 14,
-    lineHeight: 20,
-  },
+  planTitle: { fontSize: 17, fontWeight: '700', color: colors.primary },
+  planPrice: { fontSize: 14, fontWeight: '600', color: colors.textSecondary },
+  planContent: { paddingHorizontal: 16, paddingBottom: 16 },
+  planDescription: { paddingVertical: 14, color: colors.textSecondary, fontSize: 14, lineHeight: 20 },
+  alreadyHaveText: { color: colors.textSecondary, marginTop: 8, fontSize: 14 },
+  contactAdminText: { color: colors.textSecondary, marginTop: 8, fontSize: 14, fontStyle: 'italic' },
 
-  // Invite link
-  inviteLink: {
-    alignItems: 'center',
-    paddingVertical: 16,
-    paddingBottom: 32,
-  },
-  inviteLinkText: {
-    color: colors.primary,
-    fontSize: 14,
-    fontWeight: '500',
-    textDecorationLine: 'underline',
-  },
+  inviteLink: { alignItems: 'center', paddingVertical: 16, paddingBottom: 32 },
+  inviteLinkText: { color: colors.primary, fontSize: 14, fontWeight: '500', textDecorationLine: 'underline' },
 
-  // Modal
   modalBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.6)',
@@ -638,17 +528,8 @@ const styles = StyleSheet.create({
     shadowRadius: 32,
     elevation: 10,
   },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: 6,
-  },
-  modalSubtitle: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginBottom: 20,
-  },
+  modalTitle: { fontSize: 18, fontWeight: '700', color: colors.text, marginBottom: 6 },
+  modalSubtitle: { fontSize: 14, color: colors.textSecondary, marginBottom: 20 },
   inviteInput: {
     width: '100%',
     backgroundColor: colors.surfaceRaised,
@@ -661,11 +542,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  modalButtons: {
-    flexDirection: 'row',
-    gap: 10,
-    alignItems: 'center',
-  },
+  modalButtons: { flexDirection: 'row', gap: 10, alignItems: 'center' },
   cancelButton: {
     flex: 1,
     paddingVertical: 13,
@@ -675,9 +552,5 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.surfaceBorder,
   },
-  cancelButtonText: {
-    color: colors.textSecondary,
-    fontWeight: '600',
-    fontSize: 15,
-  },
+  cancelButtonText: { color: colors.textSecondary, fontWeight: '600', fontSize: 15 },
 });
