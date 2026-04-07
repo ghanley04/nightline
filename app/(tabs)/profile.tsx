@@ -23,6 +23,18 @@ import { MembershipResponse } from '../interfaces/interface';
 import { get, post } from 'aws-amplify/api';
 import { useFocusEffect } from '@react-navigation/native';
 
+
+interface DeleteAccountResponse {
+  success?: boolean;
+  error?: string;
+  message?: string;
+  details?: {
+    membershipsDeactivated?: number;
+    groupsAffected?: number;
+  };
+  timestamp?: string;
+}
+
 export async function getUserAttributes() {
   try {
     const userAttributes = await fetchUserAttributes();
@@ -201,7 +213,7 @@ export default function ProfileScreen() {
               });
 
               const { body } = await response.response;
-              const result = await body.json();
+              const result = (await body.json()) as DeleteAccountResponse;
 
               console.log('📦 Delete account result:', result);
 
@@ -338,6 +350,10 @@ export default function ProfileScreen() {
       if (result.canceled) return;
 
       const uri = result.assets[0].uri;
+
+      // Show selected image immediately
+      setImageUrl(uri);
+
       const response = await fetch(uri);
       const blob = await response.blob();
 
@@ -355,9 +371,21 @@ export default function ProfileScreen() {
 
       await upload.result;
       console.log('✅ Uploaded profile photo:', key);
-      await fetchProfilePhoto();
+
+      // Refetch remote image and bust cache
+      const { url } = await getUrl({
+        key,
+        options: {
+          accessLevel: 'private',
+          validateObjectExistence: true,
+          expiresIn: 3600,
+        },
+      });
+
+      setImageUrl(`${url.toString()}&t=${Date.now()}`);
     } catch (err) {
       console.error('❌ Upload error:', err);
+      Alert.alert('Upload Failed', 'Could not upload profile photo.');
     }
   }
 

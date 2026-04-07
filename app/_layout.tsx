@@ -2,12 +2,13 @@ import 'react-native-url-polyfill/auto';
 
 import { Stack, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Authenticator, useAuthenticator, ThemeProvider } from '@aws-amplify/ui-react-native';
-import { useColorScheme, StyleSheet, Modal, View, Text, TouchableOpacity, ScrollView } from 'react-native';
+import { useColorScheme, StyleSheet, Modal, View, Text, TouchableOpacity, ScrollView, Animated } from 'react-native';
 import colors from '../constants/colors';
 import { LinearGradient } from "expo-linear-gradient";
-import { fetchAuthSession, updateUserAttributes } from 'aws-amplify/auth';
+import { fetchAuthSession, updateUserAttributes, resendSignUpCode } from 'aws-amplify/auth';
+import type { SignUpOutput } from 'aws-amplify/auth';
 import AppLinkHandler from '@/components/AppLinkHandler';
 import * as Linking from 'expo-linking';
 import { Amplify } from 'aws-amplify';
@@ -49,13 +50,55 @@ const currentConfig = Amplify.getConfig();
 console.log('Final Amplify OAuth:', JSON.stringify(currentConfig));
 
 Hub.listen('auth', ({ payload }) => {
-  console.log('Auth event:', payload.event);
+  console.log('[Hub] Auth event:', payload.event);
   if (payload.event) {
-    console.log('Auth data:', JSON.stringify(payload.event));
+    console.log('[Hub] Auth data:', JSON.stringify(payload.event));
   }
 });
 
 SplashScreen.preventAutoHideAsync();
+
+// ─── Module-level refs so service handlers can call UI actions ────────────────
+const toSignInRef: { current: (() => void) | null } = { current: null };
+const showToastRef: { current: ((message: string, type: ToastType) => void) | null } = { current: null };
+
+// ─── Toast ────────────────────────────────────────────────────────────────────
+
+type ToastType = 'success' | 'error' | 'info';
+
+function Toast({
+  message,
+  type,
+  onDismiss,
+}: {
+  message: string;
+  type: ToastType;
+  onDismiss: () => void;
+}) {
+  const opacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.sequence([
+      Animated.timing(opacity, { toValue: 1, duration: 300, useNativeDriver: true }),
+      Animated.delay(4200),
+      Animated.timing(opacity, { toValue: 0, duration: 300, useNativeDriver: true }),
+    ]).start(() => onDismiss());
+  }, []);
+
+  const bgColor =
+    type === 'success' ? '#2e7d32' :
+      type === 'error' ? '#c62828' :
+        '#1565c0';
+
+  return (
+    <Animated.View style={[toastStyles.container, { backgroundColor: bgColor, opacity }]}>
+      <Text style={toastStyles.text}>{message}</Text>
+      <TouchableOpacity onPress={onDismiss} style={toastStyles.close}>
+        <Text style={toastStyles.closeText}>✕</Text>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
 
 // ─── Terms Modal ──────────────────────────────────────────────────────────────
 
@@ -150,22 +193,33 @@ function TermsModal({ onAccept }: { onAccept: () => void }) {
 
 function LayoutContent() {
   const router = useRouter();
-  const { authStatus } = useAuthenticator(context => [context.authStatus]);
+  const { authStatus, toSignIn } = useAuthenticator(context => [
+    context.authStatus,
+    context.toSignIn,
+  ]);
   const [isReady, setIsReady] = useState(false);
   const [groups, setGroups] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [showTerms, setShowTerms] = useState(false);
 
+  // Keep the module-level ref in sync so handleSignUp can call it
   useEffect(() => {
-    console.log('Auth Status:', authStatus);
+    toSignInRef.current = toSignIn;
+  }, [toSignIn]);
+
+  useEffect(() => {
+    console.log('[Auth] Status changed:', authStatus);
   }, [authStatus]);
 
   useEffect(() => {
     async function loadGroups() {
       try {
-        // Force refresh so custom attributes are included
         const session = await fetchAuthSession({ forceRefresh: true });
         const idToken = session.tokens?.idToken;
+        const accessToken = session.tokens?.accessToken;
+
+        console.log('[Auth] ID TOKEN:', idToken?.toString());
+        console.log('[Auth] ACCESS TOKEN PAYLOAD:', accessToken?.payload);
 
         if (!idToken) {
           setGroups([]);
@@ -173,10 +227,8 @@ function LayoutContent() {
         }
 
         const payload = idToken.payload as any;
-
-        // Check if terms have been accepted
         const termsAccepted = payload['custom:terms_accepted'];
-        console.log('Terms accepted:', termsAccepted);
+        console.log('[Auth] Terms accepted:', termsAccepted);
 
         if (!termsAccepted || termsAccepted !== 'true') {
           setShowTerms(true);
@@ -184,7 +236,7 @@ function LayoutContent() {
 
         setGroups(payload['cognito:groups'] || []);
       } catch (err) {
-        console.error('Error loading groups:', err);
+        console.error('[Auth] Error loading groups:', err);
         setGroups([]);
       } finally {
         setLoading(false);
@@ -195,6 +247,8 @@ function LayoutContent() {
       loadGroups();
     } else {
       setLoading(false);
+      setGroups([]);
+      setShowTerms(false);
     }
   }, [authStatus]);
 
@@ -206,9 +260,9 @@ function LayoutContent() {
           'custom:terms_accepted_date': new Date().toISOString(),
         }
       });
-      console.log('Terms accepted and saved');
+      console.log('[Terms] Accepted and saved');
     } catch (err) {
-      console.error('Error saving terms acceptance:', err);
+      console.error('[Terms] Error saving acceptance:', err);
     } finally {
       setShowTerms(false);
     }
@@ -222,10 +276,9 @@ function LayoutContent() {
     SplashScreen.hideAsync();
   }, []);
 
-  // Block routing until terms are accepted
   useEffect(() => {
     if (isReady && !loading && !showTerms) {
-      console.log('Routing — isAdmin:', isAdmin, '| isBusDriver:', isBusDriver);
+      console.log('[Router] Routing — isAdmin:', isAdmin, '| isBusDriver:', isBusDriver);
       if (isAdmin) {
         router.replace('/(adminTabs)');
       } else if (isBusDriver) {
@@ -234,7 +287,7 @@ function LayoutContent() {
         router.replace('/(tabs)');
       }
     }
-  }, [isReady, loading, isAdmin, isBusDriver, showTerms]);
+  }, [isReady, loading, isAdmin, isBusDriver, showTerms, authStatus]);
 
   if (!isReady) return null;
 
@@ -261,6 +314,16 @@ export function formatPhoneToE164(phone: string): string {
 export default function RootLayout() {
   const [isReady, setIsReady] = useState(false);
   const colorMode = useColorScheme();
+  const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
+
+  const showToast = (message: string, type: ToastType = 'info') => {
+    setToast({ message, type });
+  };
+
+  // ✅ Keep module-level ref in sync so service handlers (outside React) can call it
+  useEffect(() => {
+    showToastRef.current = showToast;
+  }, []);
 
   useEffect(() => {
     async function hideSplash() {
@@ -298,9 +361,9 @@ export default function RootLayout() {
               tertiary: 'transparent',
             },
             font: {
-              primary: colors.placeholder,
-              secondary: colors.placeholder,
-              tertiary: colors.placeholder,
+              primary: colors.textLight,
+              secondary: colors.textLight,
+              tertiary: colors.textLight,
             },
           },
         },
@@ -313,10 +376,12 @@ export default function RootLayout() {
         <AppLinkHandler />
         <Authenticator.Provider>
           <Authenticator
+            initialState="signIn"
             components={{
-              SignUp: ({ fields, ...props }) => (
+              SignUp: ({ fields, toSignIn, ...props }) => (
                 <Authenticator.SignUp
                   {...props}
+                  toSignIn={toSignIn}
                   fields={[
                     { name: 'username', label: 'Username', type: 'default', placeholder: 'Choose a username', required: true },
                     { name: 'email', label: 'Email Address', type: 'email', placeholder: 'Enter your email address', required: true },
@@ -339,39 +404,154 @@ export default function RootLayout() {
                 }
                 if (Object.keys(errors).length > 0) return errors;
               },
-              async handleSignUp(formData) {
+
+              async handleSignUp(formData): Promise<SignUpOutput> {
                 const { signUp } = await import('aws-amplify/auth');
                 const { username, password, options } = formData;
                 const userAttributes = { ...options?.userAttributes };
-                if (userAttributes.phone_number) {
-                  userAttributes.phone_number = formatPhoneToE164(userAttributes.phone_number);
+
+                console.log('[SignUp] ▶ Starting for username:', username);
+                console.log('[SignUp] Raw formData:', JSON.stringify({ username, options }));
+
+                try {
+                  if (userAttributes.phone_number) {
+                    console.log('[SignUp] Raw phone:', userAttributes.phone_number);
+                    userAttributes.phone_number = formatPhoneToE164(userAttributes.phone_number);
+                    console.log('[SignUp] Formatted phone:', userAttributes.phone_number);
+                  }
+
+                  userAttributes.preferred_username = username;
+                  console.log('[SignUp] Sending to Cognito:', JSON.stringify(userAttributes));
+
+                  const result = await signUp({
+                    username,
+                    password,
+                    options: { userAttributes },
+                  });
+
+                  console.log('[SignUp] ✅ SUCCESS');
+                  console.log('[SignUp] isSignUpComplete:', result.isSignUpComplete);
+                  console.log('[SignUp] userId:', result.userId);
+                  console.log('[SignUp] nextStep:', JSON.stringify(result.nextStep));
+
+                  // ✅ Notify the user that their account was created and they need to verify
+                  showToastRef.current?.(
+                    '✅ Account created! Check your email for a verification code.',
+                    'success'
+                  );
+
+                  // Cognito will automatically move to the confirmSignUp screen.
+                  // After the user enters the code it will redirect to sign-in itself.
+                  return result;
+                } catch (err: any) {
+                  console.log('[SignUp] ❌ ERROR');
+                  console.log('[SignUp] name:', err?.name);
+                  console.log('[SignUp] message:', err?.message);
+                  console.log('[SignUp] code:', err?.code);
+                  console.log('[SignUp] full:', JSON.stringify(err, Object.getOwnPropertyNames(err)));
+
+                  // Account already exists → redirect to sign-in with a toast
+                  if (
+                    err?.name === 'UsernameExistsException' ||
+                    err?.message?.includes('already exists') ||
+                    err?.message?.includes('User already exists')
+                  ) {
+                    console.log('[SignUp] ⚠️ Already exists — redirecting to sign-in');
+                    showToastRef.current?.(
+                      'An account with that username already exists. Please sign in.',
+                      'info'
+                    );
+                    toSignInRef.current?.();
+
+                    // Must return a valid SignUpOutput to satisfy TypeScript
+                    const dummy: SignUpOutput = {
+                      isSignUpComplete: true,
+                      userId: undefined,
+                      nextStep: { signUpStep: 'DONE' },
+                    };
+                    return dummy;
+                  }
+
+                  console.log('[SignUp] Unhandled — rethrowing');
+                  throw err;
                 }
-                userAttributes.preferred_username = username;
-                console.log('Submitting to Cognito:', { username, userAttributes });
-                return signUp({ username, password, options: { userAttributes } });
               },
+
               async handleSignIn({ username, password }) {
                 const { signIn } = await import('aws-amplify/auth');
+                console.log('[SignIn] ▶ Attempting for:', username);
+
                 try {
                   const result = await signIn({
                     username,
                     password,
-                    options: { authFlowType: 'USER_PASSWORD_AUTH' }
+                    options: { authFlowType: 'USER_PASSWORD_AUTH' },
                   });
-                  console.log('Sign in result:', JSON.stringify(result));
+                  console.log('[SignIn] ✅ SUCCESS');
+                  console.log('[SignIn] isSignedIn:', result.isSignedIn);
+                  console.log('[SignIn] nextStep:', JSON.stringify(result.nextStep));
                   return result;
                 } catch (err: any) {
-                  console.log('Sign in ERROR name:', err.name);
-                  console.log('Sign in ERROR message:', err.message);
-                  console.log('Sign in ERROR full:', JSON.stringify(err));
+                  console.log('[SignIn] ❌ ERROR');
+                  console.log('[SignIn] name:', err?.name);
+                  console.log('[SignIn] message:', err?.message);
+                  console.log('[SignIn] full:', JSON.stringify(err, Object.getOwnPropertyNames(err)));
+
+                  // ✅ User registered but never confirmed their email —
+                  // resend the code and show a friendly message instead of Cognito's raw error
+                  if (err?.name === 'UserNotConfirmedException') {
+                    console.log('[SignIn] ⚠️ Email not confirmed — resending code');
+                    try {
+                      await resendSignUpCode({ username });
+                      console.log('[SignIn] Verification code resent to:', username);
+                      showToastRef.current?.(
+                        'Your email isn\'t verified yet. A new code has been sent — check your inbox.',
+                        'info'
+                      );
+                    } catch (resendErr: any) {
+                      console.log('[SignIn] Failed to resend code:', resendErr?.message);
+                      showToastRef.current?.(
+                        'Please verify your email before signing in.',
+                        'error'
+                      );
+                    }
+                    // Re-throw so the Authenticator moves to its confirmSignUp screen
+                    throw err;
+                  }
+
                   throw err;
                 }
+              },
+              async handleConfirmSignUp({ username, confirmationCode }) {
+                const { confirmSignUp } = await import('aws-amplify/auth');
+                console.log('[ConfirmSignUp] ▶ Confirming for:', username);
+
+                const result = await confirmSignUp({ username, confirmationCode });
+
+                console.log('[ConfirmSignUp] ✅ SUCCESS');
+
+                // ✅ This fires immediately after successful verification
+                showToastRef.current?.(
+                  '🎉 Email verified! You can now sign in.',
+                  'success'
+                );
+
+                return result;
               },
             }}
           >
             <LayoutContent />
           </Authenticator>
         </Authenticator.Provider>
+
+        {/* Toast rendered outside Authenticator so it floats above everything */}
+        {toast && (
+          <Toast
+            message={toast.message}
+            type={toast.type}
+            onDismiss={() => setToast(null)}
+          />
+        )}
       </LinearGradient>
     </ThemeProvider>
   );
@@ -382,7 +562,43 @@ export default function RootLayout() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    justifyContent: 'center',
+  },
+});
+
+const toastStyles = StyleSheet.create({
+  container: {
+    position: 'absolute',
+    top: 60,
+    left: 20,
+    right: 20,
+    borderRadius: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
+    zIndex: 9999,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 8,
+  },
+  text: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
+    flex: 1,
+    paddingRight: 8,
+  },
+  close: {
+    padding: 4,
+  },
+  closeText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
 });
 

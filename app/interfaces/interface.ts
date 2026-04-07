@@ -5,7 +5,7 @@ export type MembershipResponse = {
   groupId?: string;
 };
 
-export interface Token {
+export default interface Token {
   token_id: string;
   user_id: string;
   group_id: string;

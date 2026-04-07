@@ -2,12 +2,10 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "module": "esnext",
+    "moduleResolution": "bundler",
     "strict": true,
-    "baseUrl": ".",
     "paths": {
-      "@/*": [
-        "*"
-      ]
+      "@/*": ["./*"]
     },
     "jsx": "react",
     "resolveJsonModule": true,

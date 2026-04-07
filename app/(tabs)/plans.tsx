@@ -7,7 +7,7 @@ import Button from '@/components/Button';
 import colors from '@/constants/colors';
 import { getCurrentUser, fetchUserAttributes } from 'aws-amplify/auth';
 import { get, post } from 'aws-amplify/api';
-import { Plan } from '../interfaces/plan';
+import Plan from '../interfaces/plan';
 import { MembershipResponse, InviteResponse } from '../interfaces/interface';
 import { useAuthenticator } from '@aws-amplify/ui-react-native';
 import { useFocusEffect } from '@react-navigation/native';
