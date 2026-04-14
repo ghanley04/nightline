@@ -159,6 +159,20 @@
           "delete"
         ]
       }
+    },
+    "/deleteGroup": {
+      "name": "/deleteGroup",
+      "lambdaFunction": "deleteGroup",
+      "permissions": {
+        "setting": "open"
+      }
+    },
+    "/transferGroupOwnership": {
+      "name": "/transferGroupOwnership",
+      "lambdaFunction": "transferGroupOwnsership",
+      "permissions": {
+        "setting": "open"
+      }
     }
   }
 }

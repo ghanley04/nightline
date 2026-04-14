@@ -16,15 +16,21 @@
  *    call would reset max_users to whatever was passed in, losing the
  *    accumulated count from the first call.
  *    Fixed: check if METADATA exists first, then either Update (increment)
- *    or Put (create fresh) — same logic was already there but now the
- *    upgrade/replace path also uses this pattern.
+ *    or Put (create fresh).
  *
- * WHAT DID NOT CHANGE (already correct)
- * --------------------------------------
- * - Cognito lookup by username before writing anything (good)
- * - Stripe customer ID mismatch check (good)
- * - manually_added: true flag on all records (good)
- * - No Stripe subscription involved, so no Stripe ordering issue
+ * 3. INVITE RECORD DEACTIVATION ON OLD MEMBERSHIPS
+ *    When deactivating an old membership, all INVITE# records for that group
+ *    are also set to active = false. Prevents old invite links from remaining
+ *    usable after a plan change.
+ *
+ * 4. GREEK MEMBERSHIP EXCLUSIVITY
+ *    When manually adding a user to a greek group, any existing greek
+ *    membership is unconditionally deactivated regardless of tier comparison.
+ *    A user may only belong to one greek group at a time.
+ *
+ * 5. CONSISTENT FALSE DEFAULTS
+ *    All new records now explicitly write isCancelled = false and
+ *    is_owner = true on member/token records so no field is left undefined.
  */
 
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
@@ -81,6 +87,44 @@ async function updateIfExists({ table, key, update, values }) {
   return true;
 }
 
+// Deactivate all INVITE# records for a given group
+async function deactivateGroupInvites(tableName, groupId, createdAt) {
+  try {
+    const inviteQuery = await dynamo.send(
+      new QueryCommand({
+        TableName: tableName,
+        KeyConditionExpression:
+          "group_id = :gid AND begins_with(group_data_members, :prefix)",
+        FilterExpression: "active = :true",
+        ExpressionAttributeValues: {
+          ":gid": groupId,
+          ":prefix": "INVITE#",
+          ":true": true,
+        },
+      })
+    );
+
+    for (const invite of inviteQuery.Items || []) {
+      await dynamo.send(
+        new UpdateCommand({
+          TableName: tableName,
+          Key: {
+            group_id: invite.group_id,
+            group_data_members: invite.group_data_members,
+          },
+          UpdateExpression: "SET active = :false, update_at = :now",
+          ExpressionAttributeValues: { ":false": false, ":now": createdAt },
+        })
+      );
+    }
+    console.log(
+      `✅ Deactivated ${inviteQuery.Items?.length || 0} invite record(s) for group: ${groupId}`
+    );
+  } catch (err) {
+    console.warn("⚠️ Could not deactivate invite records:", err.message);
+  }
+}
+
 exports.handler = async (event) => {
   console.log("📢 manual-add-membership event:", JSON.stringify(event, null, 2));
 
@@ -110,7 +154,9 @@ exports.handler = async (event) => {
     return {
       statusCode: 400,
       headers: { "Access-Control-Allow-Origin": "*" },
-      body: JSON.stringify({ error: "Missing required fields: username, email, firstName, lastName" }),
+      body: JSON.stringify({
+        error: "Missing required fields: username, email, firstName, lastName",
+      }),
     };
   }
 
@@ -145,7 +191,10 @@ exports.handler = async (event) => {
     return {
       statusCode: 400,
       headers: { "Access-Control-Allow-Origin": "*" },
-      body: JSON.stringify({ error: "No Cognito user found for the provided username", details: err.message }),
+      body: JSON.stringify({
+        error: "No Cognito user found for the provided username",
+        details: err.message,
+      }),
     };
   }
 
@@ -181,12 +230,16 @@ exports.handler = async (event) => {
     return {
       statusCode: 400,
       headers: { "Access-Control-Allow-Origin": "*" },
-      body: JSON.stringify({ error: "Cognito stripe verification/update failed", details: err.message }),
+      body: JSON.stringify({
+        error: "Cognito stripe verification/update failed",
+        details: err.message,
+      }),
     };
   }
 
   const groupId = generateGroupId(groupType);
   const newPlan = getPlanTier(groupId);
+  const isNewGreek = newPlan.type === "greek";
 
   console.log("🆕 Generated groupId:", groupId, "plan:", newPlan.type);
 
@@ -213,9 +266,16 @@ exports.handler = async (event) => {
       const existingGroupIdLower = (existingGroupId || "").toLowerCase();
       const isExistingOneTimePass =
         existingGroupIdLower.includes("night") || existingGroupIdLower.includes("bus");
+      const isExistingGreek = existingGroupIdLower.startsWith("greek");
 
       if (existingGroupId === groupId) continue;
       if (isExistingOneTimePass) continue;
+
+      // Greek exclusivity: new greek plan removes all existing greek memberships
+      if (isNewGreek && isExistingGreek) {
+        membershipsToDeactivate.push({ existingGroupId, existingPlan });
+        continue;
+      }
 
       if (
         existingPlan.type === "individual" ||
@@ -223,7 +283,6 @@ exports.handler = async (event) => {
         existingPlan.type === "greek"
       ) {
         if (newPlan.tier >= existingPlan.tier) {
-          // Queue for deactivation after new records are written
           membershipsToDeactivate.push({ existingGroupId, existingPlan });
         } else {
           // Downgrade: reduce max_users on the higher plan
@@ -242,7 +301,9 @@ exports.handler = async (event) => {
               update: "SET max_users = :newMax, update_at = :now",
               values: { ":newMax": newMaxUsers, ":now": createdAt },
             });
-            console.log(`📉 Downgrade: ${existingGroupId} max_users ${currentMaxUsers} → ${newMaxUsers}`);
+            console.log(
+              `📉 Downgrade: ${existingGroupId} max_users ${currentMaxUsers} → ${newMaxUsers}`
+            );
           }
         }
       }
@@ -271,7 +332,9 @@ exports.handler = async (event) => {
           created_at: createdAt,
           update_at: createdAt,
           active: true,
+          isCancelled: false,
           manually_added: true,
+          is_owner: true,
         },
       })
     );
@@ -318,6 +381,8 @@ exports.handler = async (event) => {
             max_users: parseInt(maxUsers, 10),
             plan_type: newPlan.type,
             stripe_customer_id: stripeCustomerId || null,
+            owner_user_id: actualUserId,
+            owner_username: username,
           },
         })
       );
@@ -341,8 +406,11 @@ exports.handler = async (event) => {
           phone_number: phoneNumber || null,
           plan_type: newPlan.type,
           created_at: createdAt,
+          update_at: createdAt,
           active: true,
+          isCancelled: false,
           manually_added: true,
+          is_owner: true,
         },
       })
     );
@@ -365,6 +433,7 @@ exports.handler = async (event) => {
             created_by: actualUserId,
             created_by_username: username,
             created_at: createdAt,
+            update_at: createdAt,
             used: false,
             invite_link: inviteLink,
             active: true,
@@ -386,9 +455,12 @@ exports.handler = async (event) => {
 
       await updateIfExists({
         table: tableName,
-        key: { group_id: existingGroupId, group_data_members: `MEMBER#USER#${actualUserId}` },
-        update: "SET active = :false, update_at = :now",
-        values: { ":false": false, ":now": createdAt },
+        key: {
+          group_id: existingGroupId,
+          group_data_members: `MEMBER#USER#${actualUserId}`,
+        },
+        update: "SET active = :false, isCancelled = :true, update_at = :now",
+        values: { ":false": false, ":true": true, ":now": createdAt },
       });
 
       await updateIfExists({
@@ -397,6 +469,9 @@ exports.handler = async (event) => {
         update: "SET active = :false, update_at = :now",
         values: { ":false": false, ":now": createdAt },
       });
+
+      // Deactivate all INVITE# records for the old group
+      await deactivateGroupInvites(tableName, existingGroupId, createdAt);
 
       // Deactivate old tokens
       const oldTokensQuery = await dynamo.send(

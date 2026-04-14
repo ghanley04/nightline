@@ -27,6 +27,16 @@
  *    We retrieve the session with expand=['line_items'] to get the real priceId
  *    and therefore the real max_members from price metadata.
  *    Without this, max_users was ALWAYS "1" regardless of the plan purchased.
+ *
+ * 4. INVITE RECORD DEACTIVATION
+ *    When deactivating an old membership, all associated INVITE# records are
+ *    also set to active = false so they can no longer be used to join the
+ *    old (now-canceled) group.
+ *
+ * 5. GREEK MEMBERSHIP EXCLUSIVITY
+ *    When a user purchases a greek plan, any existing greek membership is
+ *    deactivated regardless of tier comparison — a user may only belong to
+ *    one greek group at a time.
  */
 
 const {
@@ -51,7 +61,7 @@ const docClient = DynamoDBDocumentClient.from(rawClient);
 const cognito = new CognitoIdentityProviderClient({ region: "us-east-2" });
 
 const USER_POOL_ID = process.env.USER_POOL_ID;
-const PROCESSED_EVENTS_TABLE = "ProcessedStripeEvents"; // NEW TABLE — see explanation below
+const PROCESSED_EVENTS_TABLE = "ProcessedStripeEvents";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -107,6 +117,47 @@ function getPlanTier(groupId) {
   return { type: "unknown", tier: 0 };
 }
 
+// Deactivate all INVITE# records for a given group
+async function deactivateGroupInvites(tableName, groupId, createdAt) {
+  try {
+    const inviteQuery = await dynamo.send(
+      new QueryCommand({
+        TableName: tableName,
+        KeyConditionExpression:
+          "group_id = :gid AND begins_with(group_data_members, :prefix)",
+        FilterExpression: "active = :true",
+        ExpressionAttributeValues: {
+          ":gid": { S: groupId },
+          ":prefix": { S: "INVITE#" },
+          ":true": { BOOL: true },
+        },
+      })
+    );
+
+    for (const invite of inviteQuery.Items || []) {
+      await dynamo.send(
+        new UpdateItemCommand({
+          TableName: tableName,
+          Key: {
+            group_id: invite.group_id,
+            group_data_members: invite.group_data_members,
+          },
+          UpdateExpression: "SET active = :false, update_at = :now",
+          ExpressionAttributeValues: {
+            ":false": { BOOL: false },
+            ":now": { S: createdAt },
+          },
+        })
+      );
+    }
+    console.log(
+      `✅ Deactivated ${inviteQuery.Items?.length || 0} invite record(s) for group: ${groupId}`
+    );
+  } catch (err) {
+    console.warn("⚠️ Could not deactivate invite records:", err.message);
+  }
+}
+
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 exports.handler = async (event) => {
@@ -153,7 +204,6 @@ exports.handler = async (event) => {
         Item: {
           event_id: stripeEvent.id,
           processed_at: new Date().toISOString(),
-          // TTL: auto-delete after 48 hours (DynamoDB TTL must be enabled on this attribute)
           ttl: Math.floor(Date.now() / 1000) + 172800,
         },
         ConditionExpression: "attribute_not_exists(event_id)",
@@ -165,7 +215,6 @@ exports.handler = async (event) => {
       console.log("⚠️ Duplicate webhook event — already processed:", stripeEvent.id);
       return { statusCode: 200, body: JSON.stringify({ received: true, duplicate: true }) };
     }
-    // Any other error writing the idempotency record: fail loudly so Stripe retries
     console.error("❌ Failed to write idempotency record:", err);
     return { statusCode: 500, body: "Internal error" };
   }
@@ -182,9 +231,7 @@ exports.handler = async (event) => {
 
   // ── SAFETY STEP 2: Expand line_items to get real priceId ─────────────────
   // WHY: Stripe webhooks do NOT include line_items by default.
-  // session.line_items is always undefined in the raw payload.
-  // Without this, max_users was silently defaulting to "1" for every plan,
-  // meaning group/greek plans were misconfigured from the moment of purchase.
+  // Without this, max_users silently defaults to "1" for every plan.
   let maxUsers = "1";
   try {
     const fullSession = await stripe.checkout.sessions.retrieve(session.id, {
@@ -204,6 +251,7 @@ exports.handler = async (event) => {
   const isNightPass = groupIdLower.includes("night");
   const isBusPass = groupIdLower.includes("bus");
   const isOneTimePass = isNightPass || isBusPass;
+  const isGreekPlan = groupIdLower.startsWith("greek");
 
   // Resolve final customer ID
   let finalCustomerId = customerId;
@@ -244,7 +292,7 @@ exports.handler = async (event) => {
   const newPlan = getPlanTier(groupId);
 
   try {
-    // Query existing active memberships
+    // Query existing active memberships for this user
     const membershipsQuery = await dynamo.send(
       new QueryCommand({
         TableName: tableName,
@@ -259,7 +307,7 @@ exports.handler = async (event) => {
     );
 
     const activeMemberships = membershipsQuery.Items || [];
-    const membershipsToDeactivate = []; // collect, don't act yet
+    const membershipsToDeactivate = [];
 
     for (const membership of activeMemberships) {
       const existingGroupId = membership.group_id.S;
@@ -267,14 +315,20 @@ exports.handler = async (event) => {
       const existingGroupIdLower = existingGroupId.toLowerCase();
       const isExistingOneTimePass =
         existingGroupIdLower.includes("night") || existingGroupIdLower.includes("bus");
+      const isExistingGreek = existingGroupIdLower.startsWith("greek");
       const existingStripeCustomerId = membership.stripe_customer_id?.S;
 
       if (existingGroupId === groupId) continue;
       if (isOneTimePass) continue;
       if (isExistingOneTimePass) continue;
 
+      // Greek exclusivity: buying any greek plan deactivates ALL existing greek memberships
+      if (isGreekPlan && isExistingGreek) {
+        membershipsToDeactivate.push({ existingGroupId, existingPlan, existingStripeCustomerId });
+        continue;
+      }
+
       if (newPlan.tier >= existingPlan.tier) {
-        // Queue for deactivation AFTER new records are written
         membershipsToDeactivate.push({ existingGroupId, existingPlan, existingStripeCustomerId });
       } else if (newPlan.tier < existingPlan.tier) {
         // Downgrade: reduce max_users on existing plan
@@ -290,7 +344,7 @@ exports.handler = async (event) => {
       }
     }
 
-    // ── SAFETY STEP 3: Write NEW records BEFORE touching old ones ────────────
+    // ── SAFETY STEP 3: Write NEW records BEFORE touching old ones ─────────────
     // WHY: If we canceled the old subscription first and then a DB write failed,
     // the user would have no active membership but already paid for the new one.
     // By writing the new membership first, the user always has at least one
@@ -309,6 +363,9 @@ exports.handler = async (event) => {
           created_at: { S: createdAt },
           update_at: { S: createdAt },
           active: { BOOL: true },
+          is_owner: { BOOL: true },
+          isCancelled: { BOOL: false },
+          manually_added: { BOOL: false },
         },
       })
     );
@@ -331,6 +388,7 @@ exports.handler = async (event) => {
           max_users: { S: isOneTimePass ? "1" : maxUsers },
           plan_type: { S: planType },
           stripe_customer_id: { S: finalCustomerId },
+          owner_user_id: { S: userId },
         },
       })
     );
@@ -347,7 +405,9 @@ exports.handler = async (event) => {
           group_id: { S: groupId },
           stripe_customer_id: { S: finalCustomerId },
           created_at: { S: createdAt },
+          update_at: { S: createdAt },
           active: { BOOL: true },
+          is_owner: { BOOL: true },
         },
       })
     );
@@ -367,10 +427,12 @@ exports.handler = async (event) => {
             invite_code: { S: inviteCode },
             created_by: { S: userId },
             created_at: { S: createdAt },
+            update_at: { S: createdAt },
             used: { BOOL: false },
             invite_link: { S: inviteLink },
             active: { BOOL: true },
             stripe_customer_id: { S: finalCustomerId },
+            current_uses: { N: "0" },
           },
         })
       );
@@ -383,18 +445,32 @@ exports.handler = async (event) => {
 
       await updateIfExists({
         table: tableName,
-        key: { group_id: { S: existingGroupId }, group_data_members: { S: `MEMBER#USER#${userId}` } },
-        update: "SET active = :false, update_at = :now",
-        values: { ":false": { BOOL: false }, ":now": { S: createdAt } },
+        key: {
+          group_id: { S: existingGroupId },
+          group_data_members: { S: `MEMBER#USER#${userId}` },
+        },
+        update: "SET active = :false, isCancelled = :true, update_at = :now",
+        values: {
+          ":false": { BOOL: false },
+          ":true": { BOOL: true },
+          ":now": { S: createdAt },
+        },
       });
 
       await updateIfExists({
         table: tableName,
-        key: { group_id: { S: existingGroupId }, group_data_members: { S: "METADATA" } },
+        key: {
+          group_id: { S: existingGroupId },
+          group_data_members: { S: "METADATA" },
+        },
         update: "SET active = :false, update_at = :now",
         values: { ":false": { BOOL: false }, ":now": { S: createdAt } },
       });
 
+      // Deactivate all INVITE# records for the old group
+      await deactivateGroupInvites(tableName, existingGroupId, createdAt);
+
+      // Deactivate old tokens
       const oldTokensQuery = await dynamo.send(
         new QueryCommand({
           TableName: tokenTableName,
@@ -432,6 +508,9 @@ exports.handler = async (event) => {
     return { statusCode: 200, body: JSON.stringify({ success: true, inviteLink }) };
   } catch (err) {
     console.error("❌ Error processing subscription:", err);
-    return { statusCode: 500, body: JSON.stringify({ error: "Error processing subscription change" }) };
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: "Error processing subscription change" }),
+    };
   }
 };

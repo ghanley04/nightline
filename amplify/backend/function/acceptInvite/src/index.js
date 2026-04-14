@@ -23,9 +23,12 @@
  *    Original used ScanCommand which:
  *      - Reads every item in the entire table (expensive)
  *      - Returns max 1MB per call — silently misses items on large tables
- *    Fixed: We now query by group_data_members using a GSI, and include
- *    pagination to handle tables that grow beyond the 1MB scan limit.
- *    See note in code about the GSI you need to create.
+ *    Fixed: paginated scan as safe fallback, with note to add GSI.
+ *
+ * 3. GREEK MEMBERSHIP EXCLUSIVITY
+ *    When a user accepts an invite to a greek group, they are automatically
+ *    removed from any existing greek group before joining the new one.
+ *    Deactivates: member record, tokens for old group.
  */
 
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
@@ -135,7 +138,7 @@ exports.handler = async (event) => {
     const stripeCustomerId =
       metadataResp.Item.stripe_customer_id || inviteItem.stripe_customer_id || null;
 
-    // 3️⃣ Check if already a member
+    // 3️⃣ Check if already a member of THIS group
     const existingMembership = await dynamo.send(
       new GetCommand({
         TableName: tableName,
@@ -159,14 +162,87 @@ exports.handler = async (event) => {
       };
     }
 
+    // 3.5️⃣ Greek exclusivity — leave any existing greek group before joining a new one
+    // WHY: A user should never be an active member of two greek groups simultaneously.
+    // We deactivate their old greek member record and tokens here, before writing
+    // the new member record below.
+    const isGreekGroup = groupId.toLowerCase().startsWith("greek");
+
+    if (isGreekGroup) {
+      console.log("🏛️ [ACCEPT_INVITE] Greek group detected — checking for existing greek memberships");
+
+      const existingMembershipsResp = await dynamo.send(
+        new QueryCommand({
+          TableName: tableName,
+          IndexName: "user_id-index",
+          KeyConditionExpression: "user_id = :uid",
+          FilterExpression: "active = :true",
+          ExpressionAttributeValues: {
+            ":uid": userId,
+            ":true": true,
+          },
+        })
+      );
+
+      for (const membership of existingMembershipsResp.Items || []) {
+        const existingGid = membership.group_id;
+        if (!existingGid || !existingGid.toLowerCase().startsWith("greek")) continue;
+        if (existingGid === groupId) continue;
+
+        console.log(`🔄 [ACCEPT_INVITE] Leaving existing greek group: ${existingGid}`);
+
+        // Deactivate member record in old greek group
+        await dynamo.send(
+          new UpdateCommand({
+            TableName: tableName,
+            Key: {
+              group_id: existingGid,
+              group_data_members: `MEMBER#USER#${userId}`,
+            },
+            UpdateExpression: "SET active = :false, update_at = :now",
+            ExpressionAttributeValues: { ":false": false, ":now": now },
+          })
+        );
+        console.log(`✅ [ACCEPT_INVITE] Deactivated member record in old greek group: ${existingGid}`);
+
+        // Deactivate all tokens for old greek group
+        const oldTokens = await dynamo.send(
+          new QueryCommand({
+            TableName: tokenTableName,
+            IndexName: "user_id-index",
+            KeyConditionExpression: "user_id = :uid",
+            FilterExpression: "group_id = :gid AND active = :true",
+            ExpressionAttributeValues: {
+              ":uid": userId,
+              ":gid": existingGid,
+              ":true": true,
+            },
+          })
+        );
+
+        for (const token of oldTokens.Items || []) {
+          await dynamo.send(
+            new UpdateCommand({
+              TableName: tokenTableName,
+              Key: { token_id: token.token_id, user_id: token.user_id },
+              UpdateExpression: "SET active = :false, ended_at = :now",
+              ExpressionAttributeValues: { ":false": false, ":now": now },
+            })
+          );
+        }
+        console.log(`✅ [ACCEPT_INVITE] Deactivated ${oldTokens.Items?.length || 0} token(s) for old greek group: ${existingGid}`);
+      }
+    }
+
     // ── SAFETY: Atomic invite claim ───────────────────────────────────────────
     // WHY: Between reading the invite (step 1) and writing the member record
-    // (step 4), another Lambda instance could accept the same invite code.
+    // (step 5), another Lambda instance could accept the same invite code.
     // If max_uses is 1 and two users accept simultaneously, both would read
     // current_uses=0 < max_uses=1 and both would proceed. By moving the
     // increment to an atomic UpdateCommand with a ConditionExpression, only
     // one Lambda can succeed — the second gets ConditionalCheckFailedException
     // and returns a clean "invite full" error. No over-subscription possible.
+
     // 4️⃣ Atomically claim a slot on the invite
     const currentUses = Number(inviteItem.current_uses || 0);
     const maxUses = Number(inviteItem.max_uses || 0);
@@ -192,7 +268,7 @@ exports.handler = async (event) => {
           },
         })
       );
-      console.log(`✅ [ACCEPT_INVITE] Invite slot claimed: ${currentUses + 1}/${maxUses}`);
+      console.log(`✅ [ACCEPT_INVITE] Invite slot claimed: ${newCurrentUses}/${maxUses}`);
     } catch (err) {
       if (err.name === "ConditionalCheckFailedException") {
         console.log("⚠️ [ACCEPT_INVITE] Invite is full or inactive — race condition caught");
@@ -219,9 +295,11 @@ exports.handler = async (event) => {
           email: email || null,
           phone_number: phoneNumber || null,
           active: true,
+          is_owner: false,
+          isCancelled: false,
+          manually_added: false,
           created_at: now,
           update_at: now,
-          manually_added: false,
           stripe_customer_id: stripeCustomerId,
         },
       })
@@ -241,9 +319,11 @@ exports.handler = async (event) => {
           email: email || null,
           phone_number: phoneNumber || null,
           plan_type: planType,
-          created_at: now,
+          is_owner: false,
           active: true,
           manually_added: false,
+          created_at: now,
+          update_at: now,
           username: userName || "Unknown User",
         },
       })
@@ -256,11 +336,11 @@ exports.handler = async (event) => {
         new UpdateCommand({
           TableName: tableName,
           Key: { group_id: groupId, group_data_members: "METADATA" },
-          UpdateExpression: "SET max_users = max_users + :inc, update_at = :now",
-          ExpressionAttributeValues: { ":inc": 1, ":now": now },
+          UpdateExpression: "SET current_uses = if_not_exists(current_uses, :zero) + :inc, update_at = :now",
+          ExpressionAttributeValues: { ":inc": 1, ":zero": 0, ":now": now },
         })
       );
-      console.log("✅ [ACCEPT_INVITE] Metadata max_users incremented");
+      console.log("✅ [ACCEPT_INVITE] Metadata current_uses incremented");
     } catch (err) {
       // Non-fatal: metadata count is informational
       console.warn("⚠️ [ACCEPT_INVITE] Could not update metadata count:", err.message);

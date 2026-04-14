@@ -71,6 +71,7 @@ export default function ProfileScreen() {
           id: `token-${i}`,
           tokenId: t.token_id,
           groupId: t.group_id,
+          isOwner: t.is_owner === true || t.is_owner?.BOOL === true,
         }));
         setPasses(formatted);
       } else {
@@ -345,7 +346,7 @@ export default function ProfileScreen() {
       case 'nig': return 'Night Pass';
       case 'gre': return 'Greek Pass';
       case 'gro': return 'Group Pass';
-      default:    return 'Unknown Pass';
+      default: return 'Unknown Pass';
     }
   };
 
@@ -418,9 +419,9 @@ export default function ProfileScreen() {
           <Text style={styles.sectionTitle}>Personal Information</Text>
           <Card style={styles.infoCard}>
             {renderInfoField('First Name', 'given_name', draftAttributes?.given_name || '', <User size={18} color={colors.primary} />)}
-            {renderInfoField('Last Name',  'family_name', draftAttributes?.family_name || '', <User size={18} color={colors.primary} />)}
-            {renderInfoField('Email',      'email',       draftAttributes?.email || '',       <Mail size={18} color={colors.primary} />, 'email-address')}
-            {renderInfoField('Phone',      'phone_number', draftAttributes?.phone_number || '', <Phone size={18} color={colors.primary} />, 'phone')}
+            {renderInfoField('Last Name', 'family_name', draftAttributes?.family_name || '', <User size={18} color={colors.primary} />)}
+            {renderInfoField('Email', 'email', draftAttributes?.email || '', <Mail size={18} color={colors.primary} />, 'email-address')}
+            {renderInfoField('Phone', 'phone_number', draftAttributes?.phone_number || '', <Phone size={18} color={colors.primary} />, 'phone')}
           </Card>
 
           {/* Verification modal */}

@@ -127,6 +127,22 @@
           ],
           "category": "function",
           "resourceName": "getDataAdmin"
+        },
+        {
+          "attributes": [
+            "Name",
+            "Arn"
+          ],
+          "category": "function",
+          "resourceName": "deleteGroup"
+        },
+        {
+          "attributes": [
+            "Name",
+            "Arn"
+          ],
+          "category": "function",
+          "resourceName": "transferGroupOwnsership"
         }
       ],
       "providerPlugin": "awscloudformation",
@@ -199,6 +215,11 @@
       "providerPlugin": "awscloudformation",
       "service": "Lambda"
     },
+    "deleteGroup": {
+      "build": true,
+      "providerPlugin": "awscloudformation",
+      "service": "Lambda"
+    },
     "deleteMembership": {
       "build": true,
       "providerPlugin": "awscloudformation",
@@ -236,6 +257,11 @@
       "service": "Lambda"
     },
     "stripeCheckout": {
+      "build": true,
+      "providerPlugin": "awscloudformation",
+      "service": "Lambda"
+    },
+    "transferGroupOwnsership": {
       "build": true,
       "providerPlugin": "awscloudformation",
       "service": "Lambda"
@@ -335,6 +361,22 @@
         {
           "category": "function",
           "resourceName": "deleteAccount"
+        }
+      ]
+    },
+    "AMPLIFY_function_deleteGroup_deploymentBucketName": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "deleteGroup"
+        }
+      ]
+    },
+    "AMPLIFY_function_deleteGroup_s3Key": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "deleteGroup"
         }
       ]
     },
@@ -487,6 +529,22 @@
         {
           "category": "function",
           "resourceName": "stripeCheckout"
+        }
+      ]
+    },
+    "AMPLIFY_function_transferGroupOwnsership_deploymentBucketName": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "transferGroupOwnsership"
+        }
+      ]
+    },
+    "AMPLIFY_function_transferGroupOwnsership_s3Key": {
+      "usedBy": [
+        {
+          "category": "function",
+          "resourceName": "transferGroupOwnsership"
         }
       ]
     },

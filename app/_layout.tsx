@@ -4,7 +4,7 @@ import { Stack, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect, useRef, useState } from "react";
 import { Authenticator, useAuthenticator, ThemeProvider } from '@aws-amplify/ui-react-native';
-import { useColorScheme, StyleSheet, Modal, View, Text, TouchableOpacity, ScrollView, Animated } from 'react-native';
+import { useColorScheme, StyleSheet, Modal, View, Text, TouchableOpacity, ScrollView, Animated, KeyboardAvoidingView, Platform } from 'react-native';
 import colors from '../constants/colors';
 import { LinearGradient } from "expo-linear-gradient";
 import { fetchAuthSession, updateUserAttributes, resendSignUpCode } from 'aws-amplify/auth';
@@ -373,185 +373,191 @@ export default function RootLayout() {
         colors={[colors.secondary, '#222222']}
         style={styles.container}
       >
-        <AppLinkHandler />
-        <Authenticator.Provider>
-          <Authenticator
-            initialState="signIn"
-            components={{
-              SignUp: ({ fields, toSignIn, ...props }) => (
-                <Authenticator.SignUp
-                  {...props}
-                  toSignIn={toSignIn}
-                  fields={[
-                    { name: 'username', label: 'Username', type: 'default', placeholder: 'Choose a username', required: true },
-                    { name: 'email', label: 'Email Address', type: 'email', placeholder: 'Enter your email address', required: true },
-                    { name: 'given_name', label: 'First Name', type: 'default', placeholder: 'Enter your First Name', required: true },
-                    { name: 'family_name', label: 'Last Name', type: 'default', placeholder: 'Enter your Last Name', required: true },
-                    { name: 'phone_number', label: 'Phone Number', type: 'default', placeholder: '+1 XXXXXXXXXX', required: true },
-                    { name: 'password', label: 'Password', type: 'password', placeholder: 'Enter a password', required: true },
-                    { name: 'confirm_password', label: 'Confirm Password', type: 'password', placeholder: 'Confirm your password', required: true },
-                  ]}
-                />
-              ),
-            }}
-            services={{
-              async validateCustomSignUp(formData) {
-                const errors: Record<string, string> = {};
-                try {
-                  if (formData.phone_number) formatPhoneToE164(formData.phone_number);
-                } catch (err: any) {
-                  errors.phone_number = err.message;
-                }
-                if (Object.keys(errors).length > 0) return errors;
-              },
-
-              async handleSignUp(formData): Promise<SignUpOutput> {
-                const { signUp } = await import('aws-amplify/auth');
-                const { username, password, options } = formData;
-                const userAttributes = { ...options?.userAttributes };
-
-                console.log('[SignUp] ▶ Starting for username:', username);
-                console.log('[SignUp] Raw formData:', JSON.stringify({ username, options }));
-
-                try {
-                  if (userAttributes.phone_number) {
-                    console.log('[SignUp] Raw phone:', userAttributes.phone_number);
-                    userAttributes.phone_number = formatPhoneToE164(userAttributes.phone_number);
-                    console.log('[SignUp] Formatted phone:', userAttributes.phone_number);
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
+        >
+          <AppLinkHandler />
+          <Authenticator.Provider>
+            <Authenticator
+              initialState="signIn"
+              components={{
+                SignUp: ({ fields, toSignIn, ...props }) => (
+                  <Authenticator.SignUp
+                    {...props}
+                    toSignIn={toSignIn}
+                    fields={[
+                      { name: 'username', label: 'Username', type: 'default', placeholder: 'Choose a username', required: true },
+                      { name: 'email', label: 'Email Address', type: 'email', placeholder: 'Enter your email address', required: true },
+                      { name: 'given_name', label: 'First Name', type: 'default', placeholder: 'Enter your First Name', required: true },
+                      { name: 'family_name', label: 'Last Name', type: 'default', placeholder: 'Enter your Last Name', required: true },
+                      { name: 'phone_number', label: 'Phone Number', type: 'default', placeholder: '+1 XXXXXXXXXX', required: true },
+                      { name: 'password', label: 'Password', type: 'password', placeholder: 'Enter a password', required: true },
+                      { name: 'confirm_password', label: 'Confirm Password', type: 'password', placeholder: 'Confirm your password', required: true },
+                    ]}
+                  />
+                ),
+              }}
+              services={{
+                async validateCustomSignUp(formData) {
+                  const errors: Record<string, string> = {};
+                  try {
+                    if (formData.phone_number) formatPhoneToE164(formData.phone_number);
+                  } catch (err: any) {
+                    errors.phone_number = err.message;
                   }
+                  if (Object.keys(errors).length > 0) return errors;
+                },
 
-                  userAttributes.preferred_username = username;
-                  console.log('[SignUp] Sending to Cognito:', JSON.stringify(userAttributes));
+                async handleSignUp(formData): Promise<SignUpOutput> {
+                  const { signUp } = await import('aws-amplify/auth');
+                  const { username, password, options } = formData;
+                  const userAttributes = { ...options?.userAttributes };
 
-                  const result = await signUp({
-                    username,
-                    password,
-                    options: { userAttributes },
-                  });
+                  console.log('[SignUp] ▶ Starting for username:', username);
+                  console.log('[SignUp] Raw formData:', JSON.stringify({ username, options }));
 
-                  console.log('[SignUp] ✅ SUCCESS');
-                  console.log('[SignUp] isSignUpComplete:', result.isSignUpComplete);
-                  console.log('[SignUp] userId:', result.userId);
-                  console.log('[SignUp] nextStep:', JSON.stringify(result.nextStep));
+                  try {
+                    if (userAttributes.phone_number) {
+                      console.log('[SignUp] Raw phone:', userAttributes.phone_number);
+                      userAttributes.phone_number = formatPhoneToE164(userAttributes.phone_number);
+                      console.log('[SignUp] Formatted phone:', userAttributes.phone_number);
+                    }
 
-                  // ✅ Notify the user that their account was created and they need to verify
+                    userAttributes.preferred_username = username;
+                    console.log('[SignUp] Sending to Cognito:', JSON.stringify(userAttributes));
+
+                    const result = await signUp({
+                      username,
+                      password,
+                      options: { userAttributes },
+                    });
+
+                    console.log('[SignUp] ✅ SUCCESS');
+                    console.log('[SignUp] isSignUpComplete:', result.isSignUpComplete);
+                    console.log('[SignUp] userId:', result.userId);
+                    console.log('[SignUp] nextStep:', JSON.stringify(result.nextStep));
+
+                    // ✅ Notify the user that their account was created and they need to verify
+                    showToastRef.current?.(
+                      '✅ Account created! Check your email for a verification code.',
+                      'success'
+                    );
+
+                    // Cognito will automatically move to the confirmSignUp screen.
+                    // After the user enters the code it will redirect to sign-in itself.
+                    return result;
+                  } catch (err: any) {
+                    console.log('[SignUp] ❌ ERROR');
+                    console.log('[SignUp] name:', err?.name);
+                    console.log('[SignUp] message:', err?.message);
+                    console.log('[SignUp] code:', err?.code);
+                    console.log('[SignUp] full:', JSON.stringify(err, Object.getOwnPropertyNames(err)));
+
+                    // Account already exists → redirect to sign-in with a toast
+                    if (
+                      err?.name === 'UsernameExistsException' ||
+                      err?.message?.includes('already exists') ||
+                      err?.message?.includes('User already exists')
+                    ) {
+                      console.log('[SignUp] ⚠️ Already exists — redirecting to sign-in');
+                      showToastRef.current?.(
+                        'An account with that username already exists. Please sign in.',
+                        'info'
+                      );
+                      toSignInRef.current?.();
+
+                      // Must return a valid SignUpOutput to satisfy TypeScript
+                      const dummy: SignUpOutput = {
+                        isSignUpComplete: true,
+                        userId: undefined,
+                        nextStep: { signUpStep: 'DONE' },
+                      };
+                      return dummy;
+                    }
+
+                    console.log('[SignUp] Unhandled — rethrowing');
+                    throw err;
+                  }
+                },
+
+                async handleSignIn({ username, password }) {
+                  const { signIn } = await import('aws-amplify/auth');
+                  console.log('[SignIn] ▶ Attempting for:', username);
+
+                  try {
+                    const result = await signIn({
+                      username,
+                      password,
+                      options: { authFlowType: 'USER_PASSWORD_AUTH' },
+                    });
+                    console.log('[SignIn] ✅ SUCCESS');
+                    console.log('[SignIn] isSignedIn:', result.isSignedIn);
+                    console.log('[SignIn] nextStep:', JSON.stringify(result.nextStep));
+                    return result;
+                  } catch (err: any) {
+                    console.log('[SignIn] ❌ ERROR');
+                    console.log('[SignIn] name:', err?.name);
+                    console.log('[SignIn] message:', err?.message);
+                    console.log('[SignIn] full:', JSON.stringify(err, Object.getOwnPropertyNames(err)));
+
+                    // ✅ User registered but never confirmed their email —
+                    // resend the code and show a friendly message instead of Cognito's raw error
+                    if (err?.name === 'UserNotConfirmedException') {
+                      console.log('[SignIn] ⚠️ Email not confirmed — resending code');
+                      try {
+                        await resendSignUpCode({ username });
+                        console.log('[SignIn] Verification code resent to:', username);
+                        showToastRef.current?.(
+                          'Your email isn\'t verified yet. A new code has been sent — check your inbox.',
+                          'info'
+                        );
+                      } catch (resendErr: any) {
+                        console.log('[SignIn] Failed to resend code:', resendErr?.message);
+                        showToastRef.current?.(
+                          'Please verify your email before signing in.',
+                          'error'
+                        );
+                      }
+                      // Re-throw so the Authenticator moves to its confirmSignUp screen
+                      throw err;
+                    }
+
+                    throw err;
+                  }
+                },
+                async handleConfirmSignUp({ username, confirmationCode }) {
+                  const { confirmSignUp } = await import('aws-amplify/auth');
+                  console.log('[ConfirmSignUp] ▶ Confirming for:', username);
+
+                  const result = await confirmSignUp({ username, confirmationCode });
+
+                  console.log('[ConfirmSignUp] ✅ SUCCESS');
+
+                  // ✅ This fires immediately after successful verification
                   showToastRef.current?.(
-                    '✅ Account created! Check your email for a verification code.',
+                    '🎉 Email verified! You can now sign in.',
                     'success'
                   );
 
-                  // Cognito will automatically move to the confirmSignUp screen.
-                  // After the user enters the code it will redirect to sign-in itself.
                   return result;
-                } catch (err: any) {
-                  console.log('[SignUp] ❌ ERROR');
-                  console.log('[SignUp] name:', err?.name);
-                  console.log('[SignUp] message:', err?.message);
-                  console.log('[SignUp] code:', err?.code);
-                  console.log('[SignUp] full:', JSON.stringify(err, Object.getOwnPropertyNames(err)));
+                },
+              }}
+            >
+              <LayoutContent />
+            </Authenticator>
+          </Authenticator.Provider>
 
-                  // Account already exists → redirect to sign-in with a toast
-                  if (
-                    err?.name === 'UsernameExistsException' ||
-                    err?.message?.includes('already exists') ||
-                    err?.message?.includes('User already exists')
-                  ) {
-                    console.log('[SignUp] ⚠️ Already exists — redirecting to sign-in');
-                    showToastRef.current?.(
-                      'An account with that username already exists. Please sign in.',
-                      'info'
-                    );
-                    toSignInRef.current?.();
-
-                    // Must return a valid SignUpOutput to satisfy TypeScript
-                    const dummy: SignUpOutput = {
-                      isSignUpComplete: true,
-                      userId: undefined,
-                      nextStep: { signUpStep: 'DONE' },
-                    };
-                    return dummy;
-                  }
-
-                  console.log('[SignUp] Unhandled — rethrowing');
-                  throw err;
-                }
-              },
-
-              async handleSignIn({ username, password }) {
-                const { signIn } = await import('aws-amplify/auth');
-                console.log('[SignIn] ▶ Attempting for:', username);
-
-                try {
-                  const result = await signIn({
-                    username,
-                    password,
-                    options: { authFlowType: 'USER_PASSWORD_AUTH' },
-                  });
-                  console.log('[SignIn] ✅ SUCCESS');
-                  console.log('[SignIn] isSignedIn:', result.isSignedIn);
-                  console.log('[SignIn] nextStep:', JSON.stringify(result.nextStep));
-                  return result;
-                } catch (err: any) {
-                  console.log('[SignIn] ❌ ERROR');
-                  console.log('[SignIn] name:', err?.name);
-                  console.log('[SignIn] message:', err?.message);
-                  console.log('[SignIn] full:', JSON.stringify(err, Object.getOwnPropertyNames(err)));
-
-                  // ✅ User registered but never confirmed their email —
-                  // resend the code and show a friendly message instead of Cognito's raw error
-                  if (err?.name === 'UserNotConfirmedException') {
-                    console.log('[SignIn] ⚠️ Email not confirmed — resending code');
-                    try {
-                      await resendSignUpCode({ username });
-                      console.log('[SignIn] Verification code resent to:', username);
-                      showToastRef.current?.(
-                        'Your email isn\'t verified yet. A new code has been sent — check your inbox.',
-                        'info'
-                      );
-                    } catch (resendErr: any) {
-                      console.log('[SignIn] Failed to resend code:', resendErr?.message);
-                      showToastRef.current?.(
-                        'Please verify your email before signing in.',
-                        'error'
-                      );
-                    }
-                    // Re-throw so the Authenticator moves to its confirmSignUp screen
-                    throw err;
-                  }
-
-                  throw err;
-                }
-              },
-              async handleConfirmSignUp({ username, confirmationCode }) {
-                const { confirmSignUp } = await import('aws-amplify/auth');
-                console.log('[ConfirmSignUp] ▶ Confirming for:', username);
-
-                const result = await confirmSignUp({ username, confirmationCode });
-
-                console.log('[ConfirmSignUp] ✅ SUCCESS');
-
-                // ✅ This fires immediately after successful verification
-                showToastRef.current?.(
-                  '🎉 Email verified! You can now sign in.',
-                  'success'
-                );
-
-                return result;
-              },
-            }}
-          >
-            <LayoutContent />
-          </Authenticator>
-        </Authenticator.Provider>
-
-        {/* Toast rendered outside Authenticator so it floats above everything */}
-        {toast && (
-          <Toast
-            message={toast.message}
-            type={toast.type}
-            onDismiss={() => setToast(null)}
-          />
-        )}
+          {/* Toast rendered outside Authenticator so it floats above everything */}
+          {toast && (
+            <Toast
+              message={toast.message}
+              type={toast.type}
+              onDismiss={() => setToast(null)}
+            />
+          )}
+        </KeyboardAvoidingView>
       </LinearGradient>
     </ThemeProvider>
   );
@@ -562,7 +568,6 @@ export default function RootLayout() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: 'center',
   },
 });
 

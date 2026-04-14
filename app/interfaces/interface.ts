@@ -6,6 +6,7 @@ export type MembershipResponse = {
 };
 
 export default interface Token {
+  is_owner: boolean;
   token_id: string;
   user_id: string;
   group_id: string;

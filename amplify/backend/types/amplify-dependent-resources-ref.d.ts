@@ -61,6 +61,13 @@ export type AmplifyDependentResourcesAttributes = {
       "Name": "string",
       "Region": "string"
     },
+    "deleteGroup": {
+      "Arn": "string",
+      "LambdaExecutionRole": "string",
+      "LambdaExecutionRoleArn": "string",
+      "Name": "string",
+      "Region": "string"
+    },
     "deleteMembership": {
       "Arn": "string",
       "LambdaExecutionRole": "string",
@@ -111,6 +118,13 @@ export type AmplifyDependentResourcesAttributes = {
       "Region": "string"
     },
     "stripeCheckout": {
+      "Arn": "string",
+      "LambdaExecutionRole": "string",
+      "LambdaExecutionRoleArn": "string",
+      "Name": "string",
+      "Region": "string"
+    },
+    "transferGroupOwnsership": {
       "Arn": "string",
       "LambdaExecutionRole": "string",
       "LambdaExecutionRoleArn": "string",

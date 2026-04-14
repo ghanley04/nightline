@@ -35,6 +35,24 @@ interface DeleteAccountResponse {
   timestamp?: string;
 }
 
+// Add to your existing interfaces
+interface TransferOwnershipResponse {
+  success: boolean;
+  error?: string;
+  message?: string;
+  newOwnerUsername?: string;
+}
+
+interface DeleteGroupResponse {
+  success: boolean;
+  error?: string;
+  message?: string;
+  details?: {
+    membersDeactivated?: number;
+    totalMembers?: number;
+  };
+}
+
 export async function getUserAttributes() {
   try {
     const userAttributes = await fetchUserAttributes();
@@ -53,7 +71,9 @@ export default function ProfileScreen() {
 
   const [attributes, setAttributes] = useState<Partial<Record<UserAttributeKey, string>> | null>(null);
   const [draftAttributes, setDraftAttributes] = useState<Partial<Record<UserAttributeKey, string>> | null>(null);
-  const [passes, setPasses] = useState<{ groupId: string; id: string; tokenId: string }[]>([]);
+  const [passes, setPasses] = useState<{
+    isOwner: boolean; groupId: string; id: string; tokenId: string
+  }[]>([]);
   const [imageUrl, setImageUrl] = useState('');
   const [isEditing, setIsEditing] = useState(false);
 
@@ -103,6 +123,8 @@ export default function ProfileScreen() {
           id: `token-${i}`,
           tokenId: t.token_id,
           groupId: t.group_id,
+          isOwner: t.is_owner === true || t.is_owner?.BOOL === true,
+
         }));
         setPasses(formatted);
       } else {
@@ -409,6 +431,97 @@ export default function ProfileScreen() {
     );
   };
 
+  // Add these two handlers inside ProfileScreen, alongside deleteMembership
+
+  const handleTransferOwnership = (groupId: string) => {
+    Alert.prompt(
+      'Transfer Group Ownership',
+      'Enter the username of the new group owner. They must already be a member of this group.',
+      async (newOwnerUsername) => {
+        if (!newOwnerUsername?.trim()) return;
+
+        try {
+          const response = await post({
+            apiName: 'apiNightline',
+            path: '/transferGroupOwnership',
+            options: {
+              body: {
+                currentOwnerId: user?.userId,
+                newOwnerUsername: newOwnerUsername.trim(),
+                groupId,
+              },
+            },
+          });
+
+          const { body } = await response.response;
+          const result = (await body.json()) as unknown as TransferOwnershipResponse;
+
+          if (result.success === false) {
+            Alert.alert('Error', result.error || 'Failed to transfer ownership.');
+            return;
+          }
+
+          Alert.alert(
+            'Ownership Transferred',
+            `Group ownership has been transferred to ${newOwnerUsername}.`
+          );
+          await fetchMembershipTokens();
+        } catch (error) {
+          console.error('❌ Error transferring ownership:', error);
+          Alert.alert('Error', 'Failed to transfer ownership. Please try again.');
+        }
+      },
+      'plain-text'
+    );
+  };
+
+  const handleDeleteGroup = (groupId: string) => {
+    Alert.alert(
+      'Delete Group Subscription',
+      'This will permanently cancel the subscription and remove ALL members from the group. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Group',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const response = await post({
+                apiName: 'apiNightline',
+                path: '/deleteGroup',
+                options: {
+                  body: {
+                    requestingUserId: user?.userId,
+                    groupId,
+                    reason: 'owner_deleted_group',
+                  },
+                },
+              });
+
+              const { body } = await response.response;
+              const result = (await body.json()) as unknown as DeleteGroupResponse;
+
+              if (result.success === false) {
+                Alert.alert('Error', result.error || 'Failed to delete group.');
+                return;
+              }
+
+              const count = result.details?.membersDeactivated ?? 0;
+              Alert.alert(
+                'Group Deleted',
+                `The group has been deleted. ${count} member(s) have been removed.`
+              );
+              await fetchMembershipTokens();
+            } catch (error) {
+              console.error('❌ Error deleting group:', error);
+              Alert.alert('Error', 'Failed to delete group. Please try again.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const deleteMembership = async (groupId: string) => {
     if (!groupId || !user?.userId) return;
 
@@ -686,6 +799,11 @@ export default function ProfileScreen() {
             ) : (
               passes.map((p, i) => {
                 const isLastPass = i === passes.length - 1;
+                const isGroupOrGreek =
+                  p.groupId?.startsWith('gre') || p.groupId?.startsWith('gro');
+                // is_owner comes from your token record — make sure fetchMembership
+                // passes it through; add `isOwner: t.is_owner === true` to your formatted map
+                const isOwner = p.isOwner === true;
 
                 return (
                   <View key={p.tokenId || i}>
@@ -695,14 +813,39 @@ export default function ProfileScreen() {
                           <MapPin size={18} color={colors.primary} />
                           <Text style={styles.settingText}>{getPassType(p.groupId)}</Text>
                         </View>
+                        {isOwner && (
+                          <Text style={{ fontSize: 11, color: colors.textLight, marginLeft: 30 }}>
+                            Group Owner
+                          </Text>
+                        )}
                       </View>
 
-                      <TouchableOpacity
-                        style={styles.editButton}
-                        onPress={() => deleteMembership(p.groupId)}
-                      >
-                        <Text style={styles.modalButtonConfirmText}>Delete Subscription</Text>
-                      </TouchableOpacity>
+                      <View style={{ flexDirection: 'column', alignItems: 'flex-end' }}>
+                        {isOwner && isGroupOrGreek && (
+                          <>
+                            <TouchableOpacity
+                              style={styles.editButton}
+                              onPress={() => handleTransferOwnership(p.groupId)}
+                            >
+                              <Text style={styles.modalButtonConfirmText}>Transfer Ownership</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={styles.editButton}
+                              onPress={() => handleDeleteGroup(p.groupId)}
+                            >
+                              <Text style={[styles.modalButtonConfirmText, { color: 'red' }]}>
+                                Delete Group
+                              </Text>
+                            </TouchableOpacity>
+                          </>
+                        )}
+                        <TouchableOpacity
+                          style={styles.editButton}
+                          onPress={() => deleteMembership(p.groupId)}
+                        >
+                          <Text style={styles.modalButtonConfirmText}>Delete Subscription</Text>
+                        </TouchableOpacity>
+                      </View>
                     </View>
                     {!isLastPass && <View style={styles.divider} />}
                   </View>
