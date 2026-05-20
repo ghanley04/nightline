@@ -591,12 +591,12 @@ export default function ProfileScreen() {
   const cancelNonGreekMembership = (groupId: string) => {
     if (!groupId || !user?.userId) return;
     Alert.alert(
-      'Cancel subscription',
-      'Are you sure you want to cancel this subscription? This action cannot be undone.',
+      'Cancel membership?',
+      'Are you sure you want to cancel this [membership]? This action cannot be undone.',
       [
-        { text: 'Keep subscription', style: 'cancel' },
+        { text: 'Keep membership', style: 'cancel' },
         {
-          text: 'Cancel subscription',
+          text: 'Cancel membership',
           style: 'destructive',
           onPress: async () => {
             try {
@@ -613,10 +613,49 @@ export default function ProfileScreen() {
                 return;
               }
               await fetchMembershipTokens();
-              Alert.alert('Canceled', 'Your subscription has been canceled.');
+              Alert.alert('Canceled', 'Your membership has been canceled.');
             } catch (error) {
               console.error('❌ Error canceling membership:', error);
-              Alert.alert('Error', `Failed to cancel subscription: ${parseAmplifyError(error)}`);
+              Alert.alert('Error', `Failed to cancel membership: ${parseAmplifyError(error)}`);
+            } finally {
+              setMembershipRefreshing(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  //Same as above, but it calls a membership a pass to avoid confusion for non-Greek users. The lambda logic is identical — the mode param is what drives the flow, and Greek passes are blocked from hitting this function at all.
+  const cancelNonGreekPass = (groupId: string) => {
+    if (!groupId || !user?.userId) return;
+    Alert.alert(
+      'Cancel pass?',
+      'Are you sure you want to cancel this [pass]? This action cannot be undone.',
+      [
+        { text: 'Keep pass', style: 'cancel' },
+        {
+          text: 'Cancel pass',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setMembershipRefreshing(true);
+              const response = await post({
+                apiName: 'apiNightline',
+                path: '/delete-membership',
+                options: { body: { userId: user.userId, groupId } },
+              });
+              const { body } = await response.response;
+              const result = (await body.json()) as unknown as DeleteMembershipFlowResponse;
+              if (result.success === false) {
+                Alert.alert('Error', result.error || 'Failed to cancel pass.');
+                return;
+              }
+              await fetchMembershipTokens();
+              Alert.alert('Canceled', 'Your pass has been canceled.');
+            } catch (error) {
+              console.error('❌ Error canceling pass:', error);
+              Alert.alert('Error', `Failed to cancel pass: ${parseAmplifyError(error)}`);
             } finally {
               setMembershipRefreshing(false);
             }
@@ -648,6 +687,8 @@ export default function ProfileScreen() {
   // Greek plans get the dedicated leave / owner-delete handlers above.
   // Anything else uses the immediate-cancel path.
   const isGreekPass = (groupId: string) => (groupId || '').toLowerCase().startsWith('greek');
+  const isNightPass = (groupId: string) => (groupId || '').toLowerCase().startsWith('nig');
+  const isBusPass = (groupId: string) => (groupId || '').toLowerCase().startsWith('bus');
 
   const renderInfoField = (
     label: string,
@@ -828,6 +869,8 @@ export default function ProfileScreen() {
                 const isLastPass = i === passes.length - 1;
                 const greek = isGreekPass(p.groupId);
                 const isOwner = p.isOwner === true;
+                const nightPass = isNightPass(p.groupId);
+                const busPass = isBusPass(p.groupId);
 
                 // Pick the action button based on (greek, isOwner):
                 //   Greek + owner  → "Delete subscription" (owner_delete mode,
@@ -843,6 +886,9 @@ export default function ProfileScreen() {
                 } else if (greek) {
                   actionLabel = 'Leave';
                   onActionPress = () => leaveGreekMembership(p.groupId);
+                } else if (nightPass || busPass) {
+                  actionLabel = 'Delete pass';
+                  onActionPress = () => cancelNonGreekPass(p.groupId);
                 } else {
                   actionLabel = 'Cancel subscription';
                   onActionPress = () => cancelNonGreekMembership(p.groupId);
