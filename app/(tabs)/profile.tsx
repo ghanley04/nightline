@@ -903,7 +903,7 @@ export default function ProfileScreen() {
                           <Text style={styles.settingText}>{getPassType(p.groupId)}</Text>
                         </View>
                         {isOwner && (
-                          <Text style={{ fontSize: 11, color: colors.textLight, marginLeft: 30 }}>
+                          <Text style={{ fontSize: 11, color: colors.textLight, alignSelf: 'flex-start', marginTop: 10, marginLeft: 30, }}>
                             Owner
                           </Text>
                         )}

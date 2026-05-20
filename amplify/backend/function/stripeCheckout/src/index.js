@@ -113,8 +113,8 @@ exports.handler = async (event) => {
       mode: isSubscription ? 'subscription' : 'payment',
       payment_method_types: ['card'],
       line_items: [lineItem],
-      success_url: `https://nightline.app/payment/success?session_id={CHECKOUT_SESSION_ID}&status=success`,
-      cancel_url: `https://nightline.app/payment/cancel?status=cancel`,
+      success_url: `https://www.nightlinecomo.com/success`,
+      cancel_url: `https://www.nightlinecomo.com/cancel`,
       metadata: {
         userId,
         groupId,
