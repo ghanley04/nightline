@@ -35,22 +35,14 @@ interface DeleteAccountResponse {
   timestamp?: string;
 }
 
-// Add to your existing interfaces
+// Transfer-ownership UI is currently disabled for the initial release.
+// Backend lambda still exists (transferGroupOwnsership); this interface is
+// preserved so the UI can be re-enabled later without re-deriving the shape.
 interface TransferOwnershipResponse {
   success: boolean;
   error?: string;
   message?: string;
   newOwnerUsername?: string;
-}
-
-interface DeleteGroupResponse {
-  success: boolean;
-  error?: string;
-  message?: string;
-  details?: {
-    membersDeactivated?: number;
-    totalMembers?: number;
-  };
 }
 
 export async function getUserAttributes() {
@@ -86,12 +78,47 @@ export default function ProfileScreen() {
     code: string;
   }>({ showModal: false, code: '' });
 
-  interface DeleteMembershipResponse {
+  // ─── Type for the unified delete-membership lambda response ────────────────
+  // The lambda returns the same envelope for all three modes:
+  //   mode === 'leave'         → non-owner Greek member walked out
+  //   mode === 'owner_delete'  → Greek owner scheduled cancel-at-period-end
+  //   mode === 'cancel' (or absent) → non-Greek immediate cancel
+  interface DeleteMembershipFlowResponse {
     success: boolean;
     error?: string;
+    code?: string;
+    mode?: 'leave' | 'owner_delete' | 'cancel';
     canceledSubscriptions?: string[];
+    stripeSubscriptions?: { id: string; cancel_at: number | null; current_period_end: number }[];
+    expiresAt?: string | null;
+    invitesDeactivated?: number;
+    message?: string;
     timestamp?: string;
   }
+
+  // Pulls a useful error message out of an Amplify post() rejection. Amplify
+  // wraps non-2xx HTTP responses in errors whose body is buried under
+  // err._response.body — extract it here so callers can show something more
+  // helpful than "Unknown error".
+  const parseAmplifyError = (error: unknown, fallback = 'Unknown error occurred'): string => {
+    if (typeof error === 'object' && error !== null) {
+      const err = error as any;
+      if (err._response?.body) {
+        try {
+          const bodyError =
+            typeof err._response.body === 'string'
+              ? JSON.parse(err._response.body)
+              : err._response.body;
+          return bodyError.error || bodyError.message || fallback;
+        } catch {
+          return typeof err._response.body === 'string' ? err._response.body : fallback;
+        }
+      }
+      if (err.message) return err.message;
+    }
+    if (error instanceof Error) return error.message;
+    return fallback;
+  };
 
   const fetchMembershipTokens = useCallback(async () => {
     if (!user?.userId) {
@@ -124,7 +151,6 @@ export default function ProfileScreen() {
           tokenId: t.token_id,
           groupId: t.group_id,
           isOwner: t.is_owner === true || t.is_owner?.BOOL === true,
-
         }));
         setPasses(formatted);
       } else {
@@ -248,29 +274,7 @@ export default function ProfileScreen() {
               Alert.alert('Account Deleted', 'Your account has been permanently removed.');
             } catch (error) {
               console.error('❌ Error deleting account:', error);
-
-              let errorMessage = 'Unknown error occurred';
-
-              if (typeof error === 'object' && error !== null) {
-                const err = error as any;
-
-                if (err._response?.body) {
-                  try {
-                    const bodyError =
-                      typeof err._response.body === 'string'
-                        ? JSON.parse(err._response.body)
-                        : err._response.body;
-
-                    errorMessage = bodyError.error || bodyError.message || errorMessage;
-                  } catch {
-                    errorMessage = err._response.body;
-                  }
-                } else if (err.message) {
-                  errorMessage = err.message;
-                }
-              }
-
-              Alert.alert('Error', `Failed to delete account: ${errorMessage}`);
+              Alert.alert('Error', `Failed to delete account: ${parseAmplifyError(error)}`);
             }
           },
           style: 'destructive',
@@ -394,7 +398,6 @@ export default function ProfileScreen() {
       await upload.result;
       console.log('✅ Uploaded profile photo:', key);
 
-      // Refetch remote image and bust cache
       const { url } = await getUrl({
         key,
         options: {
@@ -431,90 +434,88 @@ export default function ProfileScreen() {
     );
   };
 
-  // Add these two handlers inside ProfileScreen, alongside deleteMembership
+  // ─── TRANSFER OWNERSHIP (TEMPORARILY DISABLED) ────────────────────────────
+  // The transfer-ownership UI is hidden for the initial release. Backend
+  // lambda (transferGroupOwnsership) remains deployable. To re-enable:
+  // (1) uncomment the handler below, (2) uncomment the Transfer button in
+  // the passes.map JSX.
+  //
+  // const handleTransferOwnership = (groupId: string) => {
+  //   Alert.prompt(
+  //     'Transfer Group Ownership',
+  //     'Enter the username of the new group owner. They must already be a member of this group.',
+  //     async (newOwnerUsername) => {
+  //       if (!newOwnerUsername?.trim()) return;
+  //       try {
+  //         const response = await post({
+  //           apiName: 'apiNightline',
+  //           path: '/transferGroupOwnership',
+  //           options: {
+  //             body: {
+  //               currentOwnerId: user?.userId,
+  //               newOwnerUsername: newOwnerUsername.trim(),
+  //               groupId,
+  //             },
+  //           },
+  //         });
+  //         const { body } = await response.response;
+  //         const result = (await body.json()) as unknown as TransferOwnershipResponse;
+  //         if (result.success === false) {
+  //           Alert.alert('Error', result.error || 'Failed to transfer ownership.');
+  //           return;
+  //         }
+  //         Alert.alert(
+  //           'Ownership Transferred',
+  //           `Group ownership has been transferred to ${newOwnerUsername}.`
+  //         );
+  //         await fetchMembershipTokens();
+  //       } catch (error) {
+  //         console.error('❌ Error transferring ownership:', error);
+  //         Alert.alert('Error', 'Failed to transfer ownership. Please try again.');
+  //       }
+  //     },
+  //     'plain-text'
+  //   );
+  // };
 
-  const handleTransferOwnership = (groupId: string) => {
-    Alert.prompt(
-      'Transfer Group Ownership',
-      'Enter the username of the new group owner. They must already be a member of this group.',
-      async (newOwnerUsername) => {
-        if (!newOwnerUsername?.trim()) return;
-
-        try {
-          const response = await post({
-            apiName: 'apiNightline',
-            path: '/transferGroupOwnership',
-            options: {
-              body: {
-                currentOwnerId: user?.userId,
-                newOwnerUsername: newOwnerUsername.trim(),
-                groupId,
-              },
-            },
-          });
-
-          const { body } = await response.response;
-          const result = (await body.json()) as unknown as TransferOwnershipResponse;
-
-          if (result.success === false) {
-            Alert.alert('Error', result.error || 'Failed to transfer ownership.');
-            return;
-          }
-
-          Alert.alert(
-            'Ownership Transferred',
-            `Group ownership has been transferred to ${newOwnerUsername}.`
-          );
-          await fetchMembershipTokens();
-        } catch (error) {
-          console.error('❌ Error transferring ownership:', error);
-          Alert.alert('Error', 'Failed to transfer ownership. Please try again.');
-        }
-      },
-      'plain-text'
-    );
-  };
-
-  const handleDeleteGroup = (groupId: string) => {
+  // ─── GREEK — non-owner leaves the group ────────────────────────────────────
+  // Posts /delete-membership with mode='leave'. The lambda only deactivates
+  // THIS user's MEMBER row + their tokens for this group. METADATA, other
+  // members, and Stripe are untouched. Owners are rejected upstream with
+  // OWNER_CANNOT_LEAVE — they must use the Delete subscription action below.
+  const leaveGreekMembership = (groupId: string) => {
+    if (!groupId || !user?.userId) return;
     Alert.alert(
-      'Delete Group Subscription',
-      'This will permanently cancel the subscription and remove ALL members from the group. This cannot be undone.',
+      'Leave this group?',
+      "You'll lose access to this Greek pass right away. The group itself and the billing owner's subscription are unaffected.",
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Delete Group',
+          text: 'Leave',
           style: 'destructive',
           onPress: async () => {
             try {
+              setMembershipRefreshing(true);
               const response = await post({
                 apiName: 'apiNightline',
-                path: '/deleteGroup',
+                path: '/delete-membership',
                 options: {
-                  body: {
-                    requestingUserId: user?.userId,
-                    groupId,
-                    reason: 'owner_deleted_group',
-                  },
+                  body: { userId: user.userId, groupId, mode: 'leave' },
                 },
               });
-
               const { body } = await response.response;
-              const result = (await body.json()) as unknown as DeleteGroupResponse;
-
+              const result = (await body.json()) as unknown as DeleteMembershipFlowResponse;
               if (result.success === false) {
-                Alert.alert('Error', result.error || 'Failed to delete group.');
+                Alert.alert('Could not leave', result.error || 'Please try again.');
                 return;
               }
-
-              const count = result.details?.membersDeactivated ?? 0;
-              Alert.alert(
-                'Group Deleted',
-                `The group has been deleted. ${count} member(s) have been removed.`
-              );
               await fetchMembershipTokens();
+              Alert.alert("You've left", "You're no longer in this group.");
             } catch (error) {
-              console.error('❌ Error deleting group:', error);
-              Alert.alert('Error', 'Failed to delete group. Please try again.');
+              console.error('❌ Error leaving membership:', error);
+              Alert.alert('Could not leave', parseAmplifyError(error, 'Failed to leave the group.'));
+            } finally {
+              setMembershipRefreshing(false);
             }
           },
         },
@@ -522,78 +523,100 @@ export default function ProfileScreen() {
     );
   };
 
-  const deleteMembership = async (groupId: string) => {
+  // ─── GREEK — billing owner schedules cancel-at-period-end ──────────────────
+  // Posts /delete-membership with mode='owner_delete'. The lambda flips the
+  // Greek subscription on Stripe to cancel_at_period_end=true (so the owner
+  // finishes paying out the current term, with no refund) and stamps the
+  // cancel intent onto METADATA. Members keep full access until the natural
+  // expires_at lifecycle (read_only → suspended → deleted) winds the group
+  // down. Outstanding invite codes are deactivated immediately so nobody new
+  // can join a winding-down workspace.
+  const ownerDeleteGreekSubscription = (groupId: string) => {
     if (!groupId || !user?.userId) return;
-
     Alert.alert(
-      'Delete Subscription',
-      'Are you sure you want to delete this subscription? This action cannot be undone.',
+      'Delete this subscription?',
+      "Your Greek subscription will stop auto-renewing. You and your members keep full access until the end of the term you've already paid for, and Stripe won't charge you again after that. This can't be undone from the app — contact billing if you change your mind.",
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: 'Keep subscription', style: 'cancel' },
         {
-          text: 'Delete',
+          text: 'Delete subscription',
           style: 'destructive',
           onPress: async () => {
             try {
-              console.log('🔍 Attempting to delete membership:', {
-                userId: user.userId,
-                groupId,
-              });
-
+              setMembershipRefreshing(true);
               const response = await post({
                 apiName: 'apiNightline',
                 path: '/delete-membership',
                 options: {
-                  body: {
-                    userId: user.userId,
-                    groupId,
-                  },
+                  body: { userId: user.userId, groupId, mode: 'owner_delete' },
                 },
               });
-
               const { body } = await response.response;
-              const rawResult = await body.json();
-              console.log('📦 Parsed result:', rawResult);
-
-              const result = rawResult as unknown as DeleteMembershipResponse;
-
+              const result = (await body.json()) as unknown as DeleteMembershipFlowResponse;
               if (result.success === false) {
-                Alert.alert('Error', result.error || 'Failed to delete subscription. Please try again.');
+                Alert.alert('Could not delete', result.error || 'Please try again.');
                 return;
               }
-
-              setMembershipRefreshing(true);
               await fetchMembershipTokens();
-              setMembershipRefreshing(false);
-
-              Alert.alert('Success', 'Your subscription has been deleted successfully.');
+              const endDate = result.expiresAt
+                ? new Date(result.expiresAt).toLocaleDateString()
+                : null;
+              Alert.alert(
+                'Subscription scheduled to end',
+                endDate
+                  ? `You and your members keep access through ${endDate}. Stripe won't charge you again.`
+                  : "You and your members keep access through the end of the current term. Stripe won't charge you again."
+              );
             } catch (error) {
-              console.error('❌ Error deleting membership:', error);
+              console.error('❌ Error deleting subscription:', error);
+              Alert.alert(
+                'Could not delete',
+                parseAmplifyError(error, 'Failed to schedule cancellation. Stripe may be unreachable — try again in a minute.')
+              );
+            } finally {
+              setMembershipRefreshing(false);
+            }
+          },
+        },
+      ]
+    );
+  };
 
-              let errorMessage = 'Unknown error occurred';
-
-              if (typeof error === 'object' && error !== null) {
-                const err = error as any;
-
-                if (err._response?.body) {
-                  try {
-                    const bodyError =
-                      typeof err._response.body === 'string'
-                        ? JSON.parse(err._response.body)
-                        : err._response.body;
-
-                    errorMessage = bodyError.error || bodyError.message || errorMessage;
-                  } catch {
-                    errorMessage = err._response.body;
-                  }
-                } else if (err.message) {
-                  errorMessage = err.message;
-                }
-              } else if (error instanceof Error) {
-                errorMessage = error.message;
+  // ─── NON-GREEK — immediate cancel for Individual/Group/Night/Bus ──────────
+  // Posts /delete-membership without a mode. The lambda falls through to the
+  // immediate-cancel branch: DB inactive, then Stripe cancel on THIS group's
+  // subscription only (never the customer's full sub list — that bug was
+  // fixed earlier). Greek plans hit the dedicated handlers above and never
+  // reach this function.
+  const cancelNonGreekMembership = (groupId: string) => {
+    if (!groupId || !user?.userId) return;
+    Alert.alert(
+      'Cancel subscription',
+      'Are you sure you want to cancel this subscription? This action cannot be undone.',
+      [
+        { text: 'Keep subscription', style: 'cancel' },
+        {
+          text: 'Cancel subscription',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setMembershipRefreshing(true);
+              const response = await post({
+                apiName: 'apiNightline',
+                path: '/delete-membership',
+                options: { body: { userId: user.userId, groupId } },
+              });
+              const { body } = await response.response;
+              const result = (await body.json()) as unknown as DeleteMembershipFlowResponse;
+              if (result.success === false) {
+                Alert.alert('Error', result.error || 'Failed to cancel subscription.');
+                return;
               }
-
-              Alert.alert('Error', `Failed to delete subscription: ${errorMessage}`);
+              await fetchMembershipTokens();
+              Alert.alert('Canceled', 'Your subscription has been canceled.');
+            } catch (error) {
+              console.error('❌ Error canceling membership:', error);
+              Alert.alert('Error', `Failed to cancel subscription: ${parseAmplifyError(error)}`);
             } finally {
               setMembershipRefreshing(false);
             }
@@ -621,6 +644,10 @@ export default function ProfileScreen() {
         return 'Unknown Pass';
     }
   };
+
+  // Greek plans get the dedicated leave / owner-delete handlers above.
+  // Anything else uses the immediate-cancel path.
+  const isGreekPass = (groupId: string) => (groupId || '').toLowerCase().startsWith('greek');
 
   const renderInfoField = (
     label: string,
@@ -799,11 +826,27 @@ export default function ProfileScreen() {
             ) : (
               passes.map((p, i) => {
                 const isLastPass = i === passes.length - 1;
-                const isGroupOrGreek =
-                  p.groupId?.startsWith('gre') || p.groupId?.startsWith('gro');
-                // is_owner comes from your token record — make sure fetchMembership
-                // passes it through; add `isOwner: t.is_owner === true` to your formatted map
+                const greek = isGreekPass(p.groupId);
                 const isOwner = p.isOwner === true;
+
+                // Pick the action button based on (greek, isOwner):
+                //   Greek + owner  → "Delete subscription" (owner_delete mode,
+                //                    cancel_at_period_end; members keep access)
+                //   Greek + member → "Leave"               (leave mode, only
+                //                    this user's row + tokens flip)
+                //   Non-Greek      → "Cancel subscription" (immediate cancel)
+                let actionLabel: string;
+                let onActionPress: () => void;
+                if (greek && isOwner) {
+                  actionLabel = 'Delete subscription';
+                  onActionPress = () => ownerDeleteGreekSubscription(p.groupId);
+                } else if (greek) {
+                  actionLabel = 'Leave';
+                  onActionPress = () => leaveGreekMembership(p.groupId);
+                } else {
+                  actionLabel = 'Cancel subscription';
+                  onActionPress = () => cancelNonGreekMembership(p.groupId);
+                }
 
                 return (
                   <View key={p.tokenId || i}>
@@ -815,35 +858,31 @@ export default function ProfileScreen() {
                         </View>
                         {isOwner && (
                           <Text style={{ fontSize: 11, color: colors.textLight, marginLeft: 30 }}>
-                            Group Owner
+                            Owner
                           </Text>
                         )}
                       </View>
 
                       <View style={{ flexDirection: 'column', alignItems: 'flex-end' }}>
-                        {isOwner && isGroupOrGreek && (
-                          <>
-                            <TouchableOpacity
-                              style={styles.editButton}
-                              onPress={() => handleTransferOwnership(p.groupId)}
-                            >
-                              <Text style={styles.modalButtonConfirmText}>Transfer Ownership</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              style={styles.editButton}
-                              onPress={() => handleDeleteGroup(p.groupId)}
-                            >
-                              <Text style={[styles.modalButtonConfirmText, { color: 'red' }]}>
-                                Delete Group
-                              </Text>
-                            </TouchableOpacity>
-                          </>
+                        {/* Transfer-ownership button — disabled for the
+                            initial release. Re-enable alongside the
+                            handleTransferOwnership handler above.
+                        {isOwner && greek && (
+                          <TouchableOpacity
+                            style={styles.editButton}
+                            onPress={() => handleTransferOwnership(p.groupId)}
+                          >
+                            <Text style={styles.modalButtonConfirmText}>Transfer Ownership</Text>
+                          </TouchableOpacity>
                         )}
+                        */}
                         <TouchableOpacity
                           style={styles.editButton}
-                          onPress={() => deleteMembership(p.groupId)}
+                          onPress={onActionPress}
                         >
-                          <Text style={styles.modalButtonConfirmText}>Delete Subscription</Text>
+                          <Text style={[styles.modalButtonConfirmText, { color: 'red' }]}>
+                            {actionLabel}
+                          </Text>
                         </TouchableOpacity>
                       </View>
                     </View>

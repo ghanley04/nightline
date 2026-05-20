@@ -1,0 +1,10 @@
+{
+  "name": "_shared",
+  "version": "1.0.0",
+  "description": "Shared helpers (SES email, Greek subscription math, email templates) used across Nightline lambdas. Not a deployed lambda itself — imported by require('../../_shared/src/...').",
+  "main": "src/email.js",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@aws-sdk/client-ses": "^3.917.0"
+  }
+}

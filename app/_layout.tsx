@@ -31,7 +31,7 @@ const redirectUrl = __DEV__
   ? Linking.createURL('/')
   : 'nightlineapp://';
 
-console.log('AWS Config OAuth:', JSON.stringify((config as any).oauth));
+// console.log('AWS Config OAuth:', JSON.stringify((config as any).oauth));
 
 const { oauth: _discard, ...configWithoutOauth } = config as any;
 
@@ -45,14 +45,14 @@ Amplify.configure({
   }
 });
 
-console.log('Final redirect:', redirectUrl);
+// console.log('Final redirect:', redirectUrl);
 const currentConfig = Amplify.getConfig();
-console.log('Final Amplify OAuth:', JSON.stringify(currentConfig));
+// console.log('Final Amplify OAuth:', JSON.stringify(currentConfig));
 
 Hub.listen('auth', ({ payload }) => {
-  console.log('[Hub] Auth event:', payload.event);
+  // console.log('[Hub] Auth event:', payload.event);
   if (payload.event) {
-    console.log('[Hub] Auth data:', JSON.stringify(payload.event));
+    // console.log('[Hub] Auth data:', JSON.stringify(payload.event));
   }
 });
 
@@ -208,7 +208,7 @@ function LayoutContent() {
   }, [toSignIn]);
 
   useEffect(() => {
-    console.log('[Auth] Status changed:', authStatus);
+    // console.log('[Auth] Status changed:', authStatus);
   }, [authStatus]);
 
   useEffect(() => {
@@ -218,8 +218,8 @@ function LayoutContent() {
         const idToken = session.tokens?.idToken;
         const accessToken = session.tokens?.accessToken;
 
-        console.log('[Auth] ID TOKEN:', idToken?.toString());
-        console.log('[Auth] ACCESS TOKEN PAYLOAD:', accessToken?.payload);
+        // console.log('[Auth] ID TOKEN:', idToken?.toString());
+        // console.log('[Auth] ACCESS TOKEN PAYLOAD:', accessToken?.payload);
 
         if (!idToken) {
           setGroups([]);
@@ -228,7 +228,7 @@ function LayoutContent() {
 
         const payload = idToken.payload as any;
         const termsAccepted = payload['custom:terms_accepted'];
-        console.log('[Auth] Terms accepted:', termsAccepted);
+        // console.log('[Auth] Terms accepted:', termsAccepted);
 
         if (!termsAccepted || termsAccepted !== 'true') {
           setShowTerms(true);
@@ -260,7 +260,7 @@ function LayoutContent() {
           'custom:terms_accepted_date': new Date().toISOString(),
         }
       });
-      console.log('[Terms] Accepted and saved');
+      // console.log('[Terms] Accepted and saved');
     } catch (err) {
       console.error('[Terms] Error saving acceptance:', err);
     } finally {
@@ -373,10 +373,25 @@ export default function RootLayout() {
         colors={[colors.secondary, '#222222']}
         style={styles.container}
       >
+        {/*
+          Keyboard handling:
+          - iOS uses behavior="padding" — when the keyboard appears we add
+            bottom padding to the wrapper so the form smoothly scrolls up.
+          - Android uses behavior={undefined} (i.e. no JS-driven avoidance).
+            Expo defaults to android:windowSoftInputMode="adjustResize", so
+            the window itself shrinks when the keyboard opens and the
+            Authenticator's internal KeyboardAwareScrollView handles the
+            rest. The previous behavior="height" + offset=24 caused the
+            outer view AND the system to BOTH resize, producing the
+            visible jump on focus.
+          - keyboardVerticalOffset=0 on both platforms because the
+            LinearGradient is the root view (no header or status-bar
+            container to compensate for).
+        */}
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={0}
         >
           <AppLinkHandler />
           <Authenticator.Provider>
@@ -450,10 +465,10 @@ export default function RootLayout() {
                     return result;
                   } catch (err: any) {
                     console.log('[SignUp] ❌ ERROR');
-                    console.log('[SignUp] name:', err?.name);
-                    console.log('[SignUp] message:', err?.message);
-                    console.log('[SignUp] code:', err?.code);
-                    console.log('[SignUp] full:', JSON.stringify(err, Object.getOwnPropertyNames(err)));
+                    // console.log('[SignUp] name:', err?.name);
+                    // console.log('[SignUp] message:', err?.message);
+                    // console.log('[SignUp] code:', err?.code);
+                    // console.log('[SignUp] full:', JSON.stringify(err, Object.getOwnPropertyNames(err)));
 
                     // Account already exists → redirect to sign-in with a toast
                     if (
@@ -493,14 +508,14 @@ export default function RootLayout() {
                       options: { authFlowType: 'USER_PASSWORD_AUTH' },
                     });
                     console.log('[SignIn] ✅ SUCCESS');
-                    console.log('[SignIn] isSignedIn:', result.isSignedIn);
-                    console.log('[SignIn] nextStep:', JSON.stringify(result.nextStep));
+                    // console.log('[SignIn] isSignedIn:', result.isSignedIn);
+                    // console.log('[SignIn] nextStep:', JSON.stringify(result.nextStep));
                     return result;
                   } catch (err: any) {
                     console.log('[SignIn] ❌ ERROR');
-                    console.log('[SignIn] name:', err?.name);
-                    console.log('[SignIn] message:', err?.message);
-                    console.log('[SignIn] full:', JSON.stringify(err, Object.getOwnPropertyNames(err)));
+                    // console.log('[SignIn] name:', err?.name);
+                    // console.log('[SignIn] message:', err?.message);
+                    // console.log('[SignIn] full:', JSON.stringify(err, Object.getOwnPropertyNames(err)));
 
                     // ✅ User registered but never confirmed their email —
                     // resend the code and show a friendly message instead of Cognito's raw error

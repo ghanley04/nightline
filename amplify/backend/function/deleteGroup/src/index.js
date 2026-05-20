@@ -1,371 +1,304 @@
 /**
- * LAMBDA: deleteGroup
+ * LAMBDA: deactivate-group
  *
- * Sets an entire greek/group subscription to INACTIVE for all members.
- * Never deletes any records — only marks them inactive.
- * Only the group owner can trigger this.
+ * PURPOSE
+ * -------
+ * Deactivates an entire group by:
+ * - setting all MEMBER#USER# records inactive
+ * - setting all INVITE# records inactive
+ * - setting METADATA inactive
+ * - setting all Tokens for users in this group inactive
  *
- * FIXES FROM PREVIOUS VERSION:
- * 1. Member query now correctly uses FilterExpression separately from
- *    KeyConditionExpression — begins_with is not valid in KeyConditionExpression
- *    on a non-key attribute, and the duplicate ExpressionAttributeValues
- *    object would have thrown a runtime error.
- * 2. Stripe cancellation happens AFTER DB is confirmed inactive (same safe
- *    ordering as delete-account and delete-membership).
- * 3. Token deactivation confirmed for all members, not just the owner.
+ * NOTES
+ * -----
+ * - This does NOT hard delete records from DynamoDB.
+ * - It performs soft-delete / deactivation using active = false.
+ * - It assumes:
+ *    Group table PK = group_id
+ *    Group table SK = group_data_members
+ *    Tokens table has PK = token_id, SK = user_id
+ *    Tokens table has GSI: user_id-index
  */
 
-const Stripe = require("stripe");
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
 const {
   DynamoDBDocumentClient,
-  GetCommand,
-  UpdateCommand,
   QueryCommand,
+  UpdateCommand,
 } = require("@aws-sdk/lib-dynamodb");
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY_TEST);
+// Co-located copies under src/shared/ — sibling _shared path fails at
+// runtime in deployed lambdas (Amplify Gen 1 only uploads src/).
+const { sendEmail } = require("./shared/email");
+const { adminDeletedWorkspace } = require("./shared/templates");
+
 const client = new DynamoDBClient({});
 const dynamo = DynamoDBDocumentClient.from(client);
 
-const TABLE = "GroupData-dev";
+const GROUPS_TABLE = "GroupData-dev";
 const TOKENS_TABLE = "Tokens";
 
 exports.handler = async (event) => {
-  console.log("📥 delete-group event received");
+  console.log("📥 deactivate-group event:", JSON.stringify(event, null, 2));
 
   try {
     const body =
       typeof event.body === "string" ? JSON.parse(event.body) : event.body;
 
-    const { requestingUserId, groupId, reason } = body || {};
+    // deletingUserId is the sub of the caller performing the delete. Optional
+    // for backward compatibility with older callers, but required to trigger
+    // the billing-owner notification — without it we can't tell whether the
+    // deleter IS the billing owner.
+    const { groupId, deletingUserId } = body || {};
 
-    if (!requestingUserId || !groupId) {
+    if (!groupId) {
       return {
         statusCode: 400,
         headers: { "Access-Control-Allow-Origin": "*" },
         body: JSON.stringify({
           success: false,
-          error: "Missing required fields: requestingUserId, groupId",
+          error: "Missing groupId",
         }),
       };
     }
 
     const now = new Date().toISOString();
-    const deletionReason = reason || "owner_deleted_group";
 
-    // ── Step 1: Verify the requesting user is the group owner ─────────────
-    const ownerRecord = await dynamo.send(
-      new GetCommand({
-        TableName: TABLE,
-        Key: {
-          group_id: groupId,
-          group_data_members: `MEMBER#USER#${requestingUserId}`,
+    // 1️⃣ Get all records for this group
+    const groupItemsResp = await dynamo.send(
+      new QueryCommand({
+        TableName: GROUPS_TABLE,
+        KeyConditionExpression: "group_id = :gid",
+        ExpressionAttributeValues: {
+          ":gid": groupId,
         },
       })
     );
 
-    if (!ownerRecord.Item) {
+    const groupItems = groupItemsResp.Items || [];
+    console.log(`📦 Found ${groupItems.length} item(s) for group ${groupId}`);
+
+    if (groupItems.length === 0) {
       return {
-        statusCode: 403,
+        statusCode: 404,
         headers: { "Access-Control-Allow-Origin": "*" },
         body: JSON.stringify({
           success: false,
-          error: "Requesting user is not a member of this group",
+          error: "Group not found",
         }),
       };
     }
 
-    if (!ownerRecord.Item.is_owner) {
-      return {
-        statusCode: 403,
-        headers: { "Access-Control-Allow-Origin": "*" },
-        body: JSON.stringify({
-          success: false,
-          error: "Only the group owner can delete the entire group",
-        }),
-      };
-    }
-
-    // ── Step 2: Collect ALL active MEMBER records for this group ──────────
-    // group_id is the partition key so we can query directly — no GSI needed.
-    // begins_with goes in FilterExpression, NOT KeyConditionExpression.
-    let members = [];
-    let lastKey = undefined;
-
-    do {
-      const result = await dynamo.send(
-        new QueryCommand({
-          TableName: TABLE,
-          KeyConditionExpression: "group_id = :gid",
-          FilterExpression:
-            "begins_with(group_data_members, :prefix) AND active = :true",
-          ExpressionAttributeValues: {
-            ":gid": groupId,
-            ":prefix": "MEMBER#USER#",
-            ":true": true,
-          },
-          ExclusiveStartKey: lastKey,
-        })
-      );
-      members = members.concat(result.Items || []);
-      lastKey = result.LastEvaluatedKey;
-    } while (lastKey);
-
-    console.log(
-      `📋 Found ${members.length} active member(s) in group ${groupId}`
+    const memberItems = groupItems.filter((item) =>
+      String(item.group_data_members || "").startsWith("MEMBER#USER#")
     );
 
-    const canceledSubscriptions = [];
-    const stripeErrors = [];
-    let deactivatedMembers = 0;
-    let failedMembers = 0;
+    const inviteItems = groupItems.filter((item) =>
+      String(item.group_data_members || "").startsWith("INVITE#")
+    );
 
-    // ── Step 3: For each member — DB first, tokens second, Stripe last ────
-    for (const member of members) {
-      const memberId = member.user_id;
-      const stripeCustomerId = member.stripe_customer_id || null;
+    const metadataItem = groupItems.find(
+      (item) => item.group_data_members === "METADATA"
+    );
 
-      console.log(`\n👤 Processing member: ${memberId}`);
+    // collect unique user ids from member records
+    const userIds = [...new Set(memberItems.map((m) => m.user_id).filter(Boolean))];
 
-      // Mark MEMBER record inactive FIRST
+    // 2️⃣ Deactivate all member records
+    for (const member of memberItems) {
       try {
         await dynamo.send(
           new UpdateCommand({
-            TableName: TABLE,
+            TableName: GROUPS_TABLE,
             Key: {
-              group_id: groupId,
-              group_data_members: `MEMBER#USER#${memberId}`,
+              group_id: member.group_id,
+              group_data_members: member.group_data_members,
             },
-            UpdateExpression: `
-              SET
-                active = :false,
-                isCancelled = :true,
-                groupDeleted = :true,
-                deletedAt = :now,
-                canceledAt = :now,
-                deletionReason = :reason,
-                update_at = :now
-            `,
+            UpdateExpression:
+              "SET active = :false, isCancelled = :true, update_at = :now, canceledAt = :now",
             ExpressionAttributeValues: {
               ":false": false,
               ":true": true,
               ":now": now,
-              ":reason": deletionReason,
             },
           })
         );
-        deactivatedMembers++;
-        console.log(`   ✅ MEMBER record set inactive for ${memberId}`);
+        console.log(`✅ Member deactivated: ${member.group_data_members}`);
       } catch (err) {
-        failedMembers++;
-        console.error(
-          `   ❌ Failed to deactivate MEMBER record for ${memberId}:`,
+        console.warn(
+          `⚠️ Failed to deactivate member ${member.group_data_members}:`,
           err.message
         );
-        // Skip tokens and Stripe for this member — don't cancel if DB failed
-        continue;
       }
+    }
 
-      // Deactivate all tokens for this member in this group
+    // 3️⃣ Deactivate all invite records
+    for (const invite of inviteItems) {
       try {
-        const memberTokens = await dynamo.send(
+        await dynamo.send(
+          new UpdateCommand({
+            TableName: GROUPS_TABLE,
+            Key: {
+              group_id: invite.group_id,
+              group_data_members: invite.group_data_members,
+            },
+            UpdateExpression: "SET active = :false, update_at = :now",
+            ExpressionAttributeValues: {
+              ":false": false,
+              ":now": now,
+            },
+          })
+        );
+        console.log(`✅ Invite deactivated: ${invite.group_data_members}`);
+      } catch (err) {
+        console.warn(
+          `⚠️ Failed to deactivate invite ${invite.group_data_members}:`,
+          err.message
+        );
+      }
+    }
+
+    // 4️⃣ Deactivate METADATA last
+    if (metadataItem) {
+      try {
+        await dynamo.send(
+          new UpdateCommand({
+            TableName: GROUPS_TABLE,
+            Key: {
+              group_id: metadataItem.group_id,
+              group_data_members: "METADATA",
+            },
+            UpdateExpression: "SET active = :false, update_at = :now",
+            ExpressionAttributeValues: {
+              ":false": false,
+              ":now": now,
+            },
+          })
+        );
+        console.log("✅ METADATA deactivated");
+      } catch (err) {
+        console.warn("⚠️ Failed to deactivate METADATA:", err.message);
+      }
+    }
+
+    // 5️⃣ Deactivate all tokens for every user in this group
+    let totalTokensDeactivated = 0;
+
+    for (const userId of userIds) {
+      try {
+        const tokenQuery = await dynamo.send(
           new QueryCommand({
             TableName: TOKENS_TABLE,
             IndexName: "user_id-index",
             KeyConditionExpression: "user_id = :uid",
             FilterExpression: "group_id = :gid AND active = :true",
             ExpressionAttributeValues: {
-              ":uid": memberId,
+              ":uid": userId,
               ":gid": groupId,
               ":true": true,
             },
           })
         );
 
-        for (const token of memberTokens.Items || []) {
-          await dynamo.send(
-            new UpdateCommand({
-              TableName: TOKENS_TABLE,
-              Key: { token_id: token.token_id, user_id: token.user_id },
-              UpdateExpression:
-                "SET active = :false, ended_at = :now, groupDeleted = :true, update_at = :now",
-              ExpressionAttributeValues: {
-                ":false": false,
-                ":now": now,
-                ":true": true,
-              },
-            })
-          );
-        }
-        console.log(
-          `   ✅ ${memberTokens.Items?.length || 0} token(s) set inactive for ${memberId}`
-        );
-      } catch (err) {
-        console.warn(
-          `   ⚠️ Could not deactivate tokens for ${memberId}:`,
-          err.message
-        );
-        // Non-fatal — continue to Stripe
-      }
+        const tokens = tokenQuery.Items || [];
+        console.log(`🔍 Found ${tokens.length} active token(s) for user ${userId}`);
 
-      // Cancel Stripe AFTER DB and tokens are confirmed inactive
-      if (stripeCustomerId && !stripeCustomerId.startsWith("guest_")) {
-        try {
-          const subscriptions = await stripe.subscriptions.list({
-            customer: stripeCustomerId,
-            status: "active",
-            limit: 100,
-          });
-
-          for (const sub of subscriptions.data) {
-            try {
-              const canceled = await stripe.subscriptions.cancel(sub.id);
-              canceledSubscriptions.push({
-                subscriptionId: sub.id,
-                memberId,
-                customerId: stripeCustomerId,
-                canceledAt: canceled.canceled_at,
-              });
-              console.log(`   ✅ Stripe subscription ${sub.id} canceled`);
-            } catch (err) {
-              console.error(
-                `   ❌ Failed to cancel subscription ${sub.id}:`,
-                err.message
-              );
-              stripeErrors.push({
-                subscriptionId: sub.id,
-                memberId,
-                error: err.message,
-              });
-            }
+        for (const token of tokens) {
+          try {
+            await dynamo.send(
+              new UpdateCommand({
+                TableName: TOKENS_TABLE,
+                Key: {
+                  token_id: token.token_id,
+                  user_id: token.user_id,
+                },
+                UpdateExpression: "SET active = :false, ended_at = :now, update_at = :now",
+                ExpressionAttributeValues: {
+                  ":false": false,
+                  ":now": now,
+                },
+              })
+            );
+            totalTokensDeactivated += 1;
+            console.log(`✅ Token deactivated: ${token.token_id}`);
+          } catch (err) {
+            console.warn(`⚠️ Failed to deactivate token ${token.token_id}:`, err.message);
           }
-        } catch (err) {
-          console.error(
-            `   ❌ Stripe API error for customer ${stripeCustomerId}:`,
-            err.message
-          );
-          stripeErrors.push({
-            customerId: stripeCustomerId,
-            memberId,
-            error: err.message,
-          });
         }
+      } catch (err) {
+        console.warn(`⚠️ Failed token lookup for user ${userId}:`, err.message);
+      }
+    }
+
+    // ── Notify the billing owner if the deleter wasn't them ────────────────
+    // WHY: admin-ownership and billing-ownership are separate post-split. A
+    // Path A transfer leaves someone paying while someone else can delete. If
+    // the admin decides to nuke the workspace, the person paying deserves a
+    // heads-up — they're still on the hook for the current term and any
+    // retained-data window.
+    //
+    // This notification is deliberately best-effort (non-fatal on failure);
+    // the deletion has already succeeded at this point.
+    try {
+      const billingOwnerUserId = metadataItem?.billing_owner_user_id;
+      const billingOwnerEmail = metadataItem?.billing_owner_email;
+
+      const deleterIsBillingOwner =
+        !!deletingUserId &&
+        !!billingOwnerUserId &&
+        deletingUserId === billingOwnerUserId;
+
+      if (billingOwnerEmail && !deleterIsBillingOwner) {
+        // Try to get a display name for the deleting admin to include in the email.
+        let deletedByDisplayName = "the workspace admin";
+        if (deletingUserId) {
+          const deleterMember = memberItems.find((m) => m.user_id === deletingUserId);
+          if (deleterMember) {
+            deletedByDisplayName =
+              deleterMember.username ||
+              [deleterMember.first_name, deleterMember.last_name].filter(Boolean).join(" ") ||
+              deletedByDisplayName;
+          }
+        }
+        const tmpl = adminDeletedWorkspace({
+          chapterName: metadataItem?.chapter_name || metadataItem?.owner_username,
+          deletedByDisplayName,
+        });
+        await sendEmail({ to: billingOwnerEmail, ...tmpl });
+      } else if (deleterIsBillingOwner) {
+        console.log("ℹ️ Billing owner performed the delete — skipping notification.");
       } else {
         console.log(
-          `   ℹ️ No Stripe customer for ${memberId} — skipping Stripe step`
+          "ℹ️ No billing_owner_email on METADATA — skipping notification. " +
+            "(Older groups created before the ownership split won't have this field.)"
         );
       }
+    } catch (notifyErr) {
+      console.warn("⚠️ Billing-owner notification failed:", notifyErr.message);
     }
-
-    // ── Step 4: Deactivate all INVITE records for this group ──────────────
-    let deactivatedInvites = 0;
-    try {
-      let invites = [];
-      let inviteLastKey = undefined;
-
-      do {
-        const result = await dynamo.send(
-          new QueryCommand({
-            TableName: TABLE,
-            KeyConditionExpression: "group_id = :gid",
-            FilterExpression: "begins_with(group_data_members, :prefix)",
-            ExpressionAttributeValues: {
-              ":gid": groupId,
-              ":prefix": "INVITE#",
-            },
-            ExclusiveStartKey: inviteLastKey,
-          })
-        );
-        invites = invites.concat(result.Items || []);
-        inviteLastKey = result.LastEvaluatedKey;
-      } while (inviteLastKey);
-
-      for (const invite of invites) {
-        try {
-          await dynamo.send(
-            new UpdateCommand({
-              TableName: TABLE,
-              Key: {
-                group_id: invite.group_id,
-                group_data_members: invite.group_data_members,
-              },
-              UpdateExpression:
-                "SET active = :false, deactivatedAt = :now, deactivatedReason = :reason, update_at = :now",
-              ExpressionAttributeValues: {
-                ":false": false,
-                ":now": now,
-                ":reason": "group_deleted",
-              },
-            })
-          );
-          deactivatedInvites++;
-        } catch (err) {
-          console.warn("   ⚠️ Failed to deactivate invite:", err.message);
-        }
-      }
-      console.log(`✅ ${deactivatedInvites} invite(s) set inactive`);
-    } catch (err) {
-      console.warn("⚠️ Error processing invites:", err.message);
-    }
-
-    // ── Step 5: Mark METADATA inactive ────────────────────────────────────
-    try {
-      await dynamo.send(
-        new UpdateCommand({
-          TableName: TABLE,
-          Key: { group_id: groupId, group_data_members: "METADATA" },
-          UpdateExpression:
-            "SET active = :false, deletedAt = :now, deletionReason = :reason, update_at = :now",
-          ExpressionAttributeValues: {
-            ":false": false,
-            ":now": now,
-            ":reason": deletionReason,
-          },
-        })
-      );
-      console.log("✅ METADATA set inactive");
-    } catch (err) {
-      console.warn("⚠️ Could not set METADATA inactive:", err.message);
-    }
-
-    console.log("\n✅ Group deletion complete");
-    console.log(`   Members deactivated: ${deactivatedMembers}/${members.length}`);
-    console.log(`   Invites deactivated: ${deactivatedInvites}`);
-    console.log(`   Stripe subscriptions canceled: ${canceledSubscriptions.length}`);
-    console.log(`   Stripe errors: ${stripeErrors.length}`);
 
     return {
       statusCode: 200,
       headers: { "Access-Control-Allow-Origin": "*" },
       body: JSON.stringify({
         success: true,
-        message: `Group ${groupId} set inactive for all ${deactivatedMembers} member(s)`,
-        details: {
-          groupId,
-          membersDeactivated: deactivatedMembers,
-          membersFailed: failedMembers,
-          totalMembers: members.length,
-          invitesDeactivated: deactivatedInvites,
-          stripeCancellations: {
-            successful: canceledSubscriptions.length,
-            failed: stripeErrors.length,
-            subscriptions: canceledSubscriptions,
-            errors: stripeErrors,
-          },
-        },
+        message: "Group deactivated successfully",
+        groupId,
+        membersDeactivated: memberItems.length,
+        invitesDeactivated: inviteItems.length,
+        tokensDeactivated: totalTokensDeactivated,
+        usersAffected: userIds.length,
         timestamp: now,
       }),
     };
   } catch (err) {
-    console.error("❌ Error in delete-group:", err);
+    console.error("❌ Error deactivating group:", err);
     return {
       statusCode: 500,
       headers: { "Access-Control-Allow-Origin": "*" },
       body: JSON.stringify({
         success: false,
         error: err.message,
-        stack: undefined,
       }),
     };
   }

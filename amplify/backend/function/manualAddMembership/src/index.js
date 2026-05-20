@@ -47,6 +47,8 @@ const {
   AdminUpdateUserAttributesCommand,
 } = require("@aws-sdk/client-cognito-identity-provider");
 const crypto = require("crypto");
+// Co-located copy — see addMembership for the deploy-time rationale.
+const { computeGreekTermDates } = require("./shared/greek");
 
 const client = new DynamoDBClient({});
 const dynamo = DynamoDBDocumentClient.from(client);
@@ -150,12 +152,12 @@ exports.handler = async (event) => {
     stripeCustomerId: inputStripeCustomerId,
   } = parsedBody;
 
-  if (!username || !email || !firstName || !lastName) {
+  if (!username || !email || !firstName || !lastName || !inputStripeCustomerId) {
     return {
       statusCode: 400,
       headers: { "Access-Control-Allow-Origin": "*" },
       body: JSON.stringify({
-        error: "Missing required fields: username, email, firstName, lastName",
+        error: "Missing required fields: username, email, firstName, lastName, stripeCustomerId",
       }),
     };
   }
@@ -316,6 +318,12 @@ exports.handler = async (event) => {
     // has two memberships — far better than having none.
 
     // Write new MEMBER record
+    // NOTE on ownership: the purchaser is both the billing owner AND the admin
+    // owner at creation. These can diverge later via a Path A transfer (see
+    // transferGroupOwnsership lambda). We set is_billing_owner on the member
+    // record so the sendExpiryReminder lambda can find the billing owner
+    // without re-reading METADATA, and is_owner is kept as the admin flag for
+    // backward compatibility with existing queries.
     await dynamo.send(
       new PutCommand({
         TableName: tableName,
@@ -324,7 +332,7 @@ exports.handler = async (event) => {
           group_data_members: `MEMBER#USER#${actualUserId}`,
           user_id: actualUserId,
           username,
-          stripe_customer_id: stripeCustomerId || null,
+          stripe_customer_id: stripeCustomerId,
           email,
           first_name: firstName,
           last_name: lastName,
@@ -335,6 +343,7 @@ exports.handler = async (event) => {
           isCancelled: false,
           manually_added: true,
           is_owner: true,
+          is_billing_owner: true,
         },
       })
     );
@@ -361,32 +370,69 @@ exports.handler = async (event) => {
               ":newMax": newMax,
               ":now": createdAt,
               ":true": true,
-              ":cid": stripeCustomerId || null,
+              ":cid": stripeCustomerId ,
             },
           })
         );
         console.log(`✅ METADATA updated: max_users → ${newMax}`);
       }
     } else {
-      // Does not exist — create fresh
+      // Does not exist — create fresh.
+      //
+      // For Greek plans we ALSO stamp the subscription lifecycle fields:
+      //   expires_at     — createdAt + 1 year (Greek is a fixed-term product)
+      //   read_only_at   — same as expires_at
+      //   suspended_at   — expires_at + 7 days
+      //   purge_at       — suspended_at + 30 days
+      //   status         — 'active'
+      //   opt_out_reminders — false
+      // And we track BOTH owner roles. owner_user_id / owner_username are
+      // kept as the admin-owner fields for backward compatibility with existing
+      // queries; billing_owner_user_id / billing_owner_username are the new
+      // fields used by reminder/delete flows. On creation they point to the
+      // same user; a Path A transfer diverges them.
+      const metadataItem = {
+        group_id: groupId,
+        group_data_members: "METADATA",
+        created_at: createdAt,
+        update_at: createdAt,
+        active: true,
+        status: "active",
+        max_users: parseInt(maxUsers, 10),
+        plan_type: newPlan.type,
+        stripe_customer_id: stripeCustomerId,
+        owner_user_id: actualUserId,
+        owner_username: username,
+        admin_owner_user_id: actualUserId,
+        admin_owner_username: username,
+        billing_owner_user_id: actualUserId,
+        billing_owner_username: username,
+        billing_owner_email: email,
+        opt_out_reminders: false,
+      };
+
+      if (newPlan.type === "greek") {
+        const term = computeGreekTermDates(createdAt);
+        metadataItem.expires_at = term.expiresAt;
+        metadataItem.read_only_at = term.readOnlyAt;
+        metadataItem.suspended_at = term.suspendedAt;
+        metadataItem.purge_at = term.purgeAt;
+        // Reminder bookkeeping: which windows have we already emailed the
+        // billing owner about? Used by sendExpiryReminder to guarantee
+        // at-most-once delivery per window even if the scheduler runs twice.
+        metadataItem.reminders_sent = [];
+      }
+
       await dynamo.send(
         new PutCommand({
           TableName: tableName,
-          Item: {
-            group_id: groupId,
-            group_data_members: "METADATA",
-            created_at: createdAt,
-            update_at: createdAt,
-            active: true,
-            max_users: parseInt(maxUsers, 10),
-            plan_type: newPlan.type,
-            stripe_customer_id: stripeCustomerId || null,
-            owner_user_id: actualUserId,
-            owner_username: username,
-          },
+          Item: metadataItem,
         })
       );
-      console.log("✅ METADATA record created");
+      console.log(
+        "✅ METADATA record created",
+        newPlan.type === "greek" ? `(Greek, expires ${metadataItem.expires_at})` : ""
+      );
     }
 
     // Write TOKEN record
@@ -399,7 +445,7 @@ exports.handler = async (event) => {
           user_id: actualUserId,
           username,
           group_id: groupId,
-          stripe_customer_id: stripeCustomerId || null,
+          stripe_customer_id: stripeCustomerId,
           email,
           first_name: firstName,
           last_name: lastName,
@@ -442,7 +488,7 @@ exports.handler = async (event) => {
             email,
             first_name: firstName,
             last_name: lastName,
-            stripe_customer_id: stripeCustomerId || null,
+            stripe_customer_id: stripeCustomerId,
           },
         })
       );

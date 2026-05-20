@@ -80,6 +80,11 @@ export default function ManualAddMembership() {
       return;
     }
 
+    if (!formData.stripeCustomerId.trim()) {
+      Alert.alert('Error', 'Please enter a Stripe Customer ID');
+      return;
+    }
+
     if (isGroupOrGreek()) {
       const maxSubs = parseInt(formData.maxSubscribers, 10);
       if (!formData.maxSubscribers || maxSubs < 1 || maxSubs > 100) {
@@ -277,7 +282,7 @@ export default function ManualAddMembership() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.label}>Stripe Customer ID <Text style={styles.optional}>(optional)</Text></Text>
+              <Text style={styles.label}>Stripe Customer ID</Text>
               <TextInput
                 style={styles.input}
                 value={formData.stripeCustomerId}

@@ -22,6 +22,11 @@ export const mockSubscription: Subscription = {
   price: 32.99,
   startDate: '2025-01-15',
   endDate: '2025-12-31',
+  // For individual plans the billing owner and admin owner are the same user
+  // who purchased the subscription. These fields are only distinct for Greek
+  // plans that have had a Path A transfer.
+  billingOwnerUserId: 'user-123456',
+  adminOwnerUserId: 'user-123456',
   autoRenew: true,
   status: 'active',
 };

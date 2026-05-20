@@ -24,6 +24,16 @@ export default function SubscriptionPlansScreen() {
   const { user } = useAuthenticator(ctx => [ctx.user]);
   const [inviteCode, setInviteCode] = useState<string>('');
   const [inviteModalVisible, setInviteModalVisible] = useState(false);
+  // When the server returns 409 GREEK_MEMBERSHIP_EXISTS we swap the invite
+  // modal's contents for a confirmation view instead of popping a separate
+  // Alert. The modal stays on screen the whole time — the user never leaves
+  // the invite-entry context.
+  const [switchWarning, setSwitchWarning] = useState<{
+    existingGroups: { groupId: string; groupName: string }[];
+  } | null>(null);
+  // Shown when the user is an owner of another Greek group and therefore
+  // can't switch without transferring ownership first.
+  const [ownerBlockedMessage, setOwnerBlockedMessage] = useState<string | null>(null);
 
   const [membershipFlags, setMembershipFlags] = useState({
     hasGroup: false,
@@ -235,6 +245,58 @@ export default function SubscriptionPlansScreen() {
     }
   };
 
+  // Pulls the JSON body out of an Amplify error thrown by post(). 409s
+  // come through as exceptions but carry the structured body on
+  // err._response.body (see same pattern in profile.tsx).
+  const parseAmplifyErrorBody = (err: any): any | null => {
+    if (!err?._response?.body) return null;
+    try {
+      return typeof err._response.body === 'string'
+        ? JSON.parse(err._response.body)
+        : err._response.body;
+    } catch {
+      return null;
+    }
+  };
+
+  // Core invite-join call. Optional confirmSwitch tells the backend
+  // "yes, I already saw the warning about dropping my old Greek group".
+  const performJoin = async (confirmSwitch: boolean) => {
+    const currentUser = await getCurrentUser();
+    const attributes = await fetchUserAttributes();
+
+    const requestBody = {
+      inviteCode,
+      userId: currentUser.userId,
+      userName: currentUser.username,
+      email: attributes.email ?? null,
+      phoneNumber: attributes.phone_number ?? null,
+      confirmSwitch,
+    };
+
+    console.log('📤 [INVITE] request body:', JSON.stringify(requestBody, null, 2));
+
+    const response = await post({
+      apiName: 'apiNightline',
+      path: '/accept-invite',
+      options: { body: requestBody },
+    });
+
+    const httpResponse = await response.response;
+    const rawText = await httpResponse.body.text();
+    return JSON.parse(rawText) as {
+      alreadyMember?: boolean;
+      success?: boolean;
+      message?: string;
+      error?: string;
+      switched?: boolean;
+      code?: string;
+      existingGroups?: { groupId: string; groupName: string }[];
+      existingGroupId?: string;
+      requiresConfirmation?: boolean;
+    };
+  };
+
   const handleJoinInvite = async () => {
     if (!inviteCode) {
       Alert.alert('Enter Invite Code', 'Please enter a valid invite code.');
@@ -243,66 +305,109 @@ export default function SubscriptionPlansScreen() {
 
     try {
       setIsLoading(true);
-
-      const currentUser = await getCurrentUser();
-      const attributes = await fetchUserAttributes();
-
-      const requestBody = {
-        inviteCode,
-        userId: currentUser.userId,
-        userName: currentUser.username,
-        email: attributes.email ?? null,
-        phoneNumber: attributes.phone_number ?? null,
-      };
-
-      console.log('📤 [INVITE] request body:', JSON.stringify(requestBody, null, 2));
-
-      const response = await post({
-        apiName: 'apiNightline',
-        path: '/accept-invite',
-        options: { body: requestBody },
-      });
-
-      const httpResponse = await response.response;
-      const rawText = await httpResponse.body.text();
-      const result = JSON.parse(rawText) as {
-        alreadyMember?: boolean;
-        success?: boolean;
-        message?: string;
-        error?: string;
-      };
-
-      if (!result.success && !result.alreadyMember) {
-        throw new Error(result.error || result.message || 'Join invite failed');
-      }
-
-      Alert.alert(
-        result.alreadyMember ? 'Already a Member' : 'Joined Successfully',
-        result.alreadyMember ? "You're already in this group." : "You've successfully joined the group!"
-      );
-
-      await fetchMembershipTokens();
-      setInviteCode('');
-      setInviteModalVisible(false);
+      const result = await performJoin(false);
+      await handleJoinResult(result);
     } catch (err: any) {
       console.error('❌ [INVITE] Error joining invite:', err);
 
-      let errorMessage = err?.message || 'Failed to join invite. Please check the code and try again.';
-
-      if (err?._response?.body) {
-        try {
-          const parsed =
-            typeof err._response.body === 'string'
-              ? JSON.parse(err._response.body)
-              : err._response.body;
-          errorMessage = parsed.error || parsed.message || parsed.details || errorMessage;
-        } catch {}
+      // 409 responses arrive as thrown exceptions. Pull the JSON body so we
+      // can surface the structured switch-warning + owner-blocked codes
+      // rather than showing the raw Amplify error.
+      const parsed = parseAmplifyErrorBody(err);
+      if (parsed) {
+        await handleJoinResult(parsed);
+        return;
       }
 
+      const errorMessage =
+        err?.message || 'Failed to join invite. Please check the code and try again.';
       Alert.alert('Error', errorMessage);
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Reset all modal-internal states back to the initial enter-code form.
+  const resetInviteModalViews = () => {
+    setSwitchWarning(null);
+    setOwnerBlockedMessage(null);
+  };
+
+  // Close the modal entirely — used by Cancel buttons and after a
+  // successful join.
+  const closeInviteModal = () => {
+    setInviteModalVisible(false);
+    setInviteCode('');
+    resetInviteModalViews();
+  };
+
+  // Called when the user taps "Yes, switch" on the warning view. Re-invokes
+  // the join with confirmSwitch=true and threads the response back through
+  // handleJoinResult.
+  const confirmGreekSwitch = async () => {
+    try {
+      setIsLoading(true);
+      const confirmed = await performJoin(true);
+      await handleJoinResult(confirmed);
+    } catch (err: any) {
+      const parsed = parseAmplifyErrorBody(err);
+      if (parsed) {
+        await handleJoinResult(parsed);
+        return;
+      }
+      Alert.alert('Error', err?.message || 'Failed to switch memberships.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Shared handling of both the 2xx success response and the 409
+  // GREEK_MEMBERSHIP_EXISTS / OWNER_MUST_TRANSFER_FIRST payloads. These
+  // 409 cases swap the modal's contents rather than firing an Alert, so the
+  // user stays inside the invite-entry flow the entire time.
+  const handleJoinResult = async (result: Awaited<ReturnType<typeof performJoin>>) => {
+    // Switch-membership confirmation path — keep the modal open, show
+    // the warning view.
+    if (result.code === 'GREEK_MEMBERSHIP_EXISTS' && result.requiresConfirmation) {
+      setOwnerBlockedMessage(null);
+      setSwitchWarning({
+        existingGroups: result.existingGroups || [],
+      });
+      return;
+    }
+
+    // Owner of another Greek group — refuse. Show the error view inside
+    // the modal instead of an Alert so the user understands it without
+    // losing their spot.
+    if (result.code === 'OWNER_MUST_TRANSFER_FIRST') {
+      setSwitchWarning(null);
+      setOwnerBlockedMessage(
+        result.error ||
+          "You're the owner of another Greek group. Transfer ownership or contact billing@nightlinecomo.com before joining a new group."
+      );
+      return;
+    }
+
+    if (!result.success && !result.alreadyMember) {
+      Alert.alert('Error', result.error || result.message || 'Join invite failed');
+      return;
+    }
+
+    Alert.alert(
+      result.alreadyMember
+        ? 'Already a Member'
+        : result.switched
+        ? 'Switched Greek groups'
+        : 'Joined Successfully',
+      result.alreadyMember
+        ? "You're already in this group."
+        : result.switched
+        ? "You've switched to the new Greek group. Your previous membership has been deactivated."
+        : "You've successfully joined the group!",
+    );
+
+    await fetchMembershipTokens();
+    closeInviteModal();
   };
 
   const renderPlanAction = (plan: Plan) => {
@@ -401,7 +506,7 @@ export default function SubscriptionPlansScreen() {
         visible={inviteModalVisible}
         transparent
         animationType="fade"
-        onRequestClose={() => setInviteModalVisible(false)}
+        onRequestClose={closeInviteModal}
       >
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -410,35 +515,96 @@ export default function SubscriptionPlansScreen() {
           <TouchableOpacity
             style={StyleSheet.absoluteFill}
             activeOpacity={1}
-            onPress={() => setInviteModalVisible(false)}
+            onPress={closeInviteModal}
           />
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Enter Invite Code</Text>
-            <Text style={styles.modalSubtitle}>Paste the code shared by your group admin.</Text>
-            <TextInput
-              style={styles.inviteInput}
-              placeholder="Enter code here"
-              placeholderTextColor={colors.textSecondary}
-              value={inviteCode}
-              onChangeText={setInviteCode}
-              autoFocus
-            />
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={() => {
-                  setInviteModalVisible(false);
-                  setInviteCode('');
-                }}
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <Button
-                title={isLoading ? "Joining..." : "Join Group"}
-                onPress={handleJoinInvite}
-                disabled={isLoading || !inviteCode}
-              />
-            </View>
+            {/* View 1 — the user is the owner of another Greek group and
+                must transfer ownership first. Blocking state. */}
+            {ownerBlockedMessage ? (
+              <>
+                <Text style={styles.modalTitle}>Can't switch yet</Text>
+                <Text style={styles.modalSubtitle}>{ownerBlockedMessage}</Text>
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity
+                    style={styles.cancelButton}
+                    onPress={closeInviteModal}
+                  >
+                    <Text style={styles.cancelButtonText}>Close</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : switchWarning ? (
+              /* View 2 — user has another active Greek membership they are
+                 NOT the owner of. Require explicit confirmation. */
+              <>
+                <Text style={styles.modalTitle}>Switch Greek memberships?</Text>
+                <Text style={styles.modalSubtitle}>
+                  {switchWarning.existingGroups.length > 0
+                    ? `You are currently a member of ${switchWarning.existingGroups
+                        .map((g) => g.groupName)
+                        .join(', ')}.`
+                    : 'You already have an active Greek membership.'}
+                </Text>
+                <Text style={styles.modalSubtitle}>
+                  Accepting this invite will remove you from your current
+                  Greek group. You can only be a member of one Greek group at
+                  a time.
+                </Text>
+                <Text style={[styles.modalSubtitle, styles.switchWarningFinal]}>
+                  Do you want to switch?
+                </Text>
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity
+                    style={styles.cancelButton}
+                    onPress={() => {
+                      // "Keep current" — close the whole modal (user
+                      // explicitly chose not to switch). Keeping just the
+                      // warning cleared would drop them back on the enter-
+                      // code form, which is worse UX — they'd have to tap
+                      // Cancel a second time.
+                      closeInviteModal();
+                    }}
+                    disabled={isLoading}
+                  >
+                    <Text style={styles.cancelButtonText}>Keep current</Text>
+                  </TouchableOpacity>
+                  <Button
+                    title={isLoading ? 'Switching…' : 'Yes, switch'}
+                    onPress={confirmGreekSwitch}
+                    disabled={isLoading}
+                  />
+                </View>
+              </>
+            ) : (
+              /* View 3 (default) — enter invite code. */
+              <>
+                <Text style={styles.modalTitle}>Enter Invite Code</Text>
+                <Text style={styles.modalSubtitle}>
+                  Paste the code shared by your group admin.
+                </Text>
+                <TextInput
+                  style={styles.inviteInput}
+                  placeholder="Enter code here"
+                  placeholderTextColor={colors.textSecondary}
+                  value={inviteCode}
+                  onChangeText={setInviteCode}
+                  autoFocus
+                />
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity
+                    style={styles.cancelButton}
+                    onPress={closeInviteModal}
+                  >
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <Button
+                    title={isLoading ? 'Joining...' : 'Join Group'}
+                    onPress={handleJoinInvite}
+                    disabled={isLoading || !inviteCode}
+                  />
+                </View>
+              </>
+            )}
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -530,6 +696,10 @@ const styles = StyleSheet.create({
   },
   modalTitle: { fontSize: 18, fontWeight: '700', color: colors.text, marginBottom: 6 },
   modalSubtitle: { fontSize: 14, color: colors.textSecondary, marginBottom: 20 },
+  // Used on the final "Do you want to switch?" line inside the switch-
+  // confirmation view so it reads with a bit more weight than the preceding
+  // explanatory sentences.
+  switchWarningFinal: { color: colors.text, fontWeight: '600', marginBottom: 20 },
   inviteInput: {
     width: '100%',
     backgroundColor: colors.surfaceRaised,

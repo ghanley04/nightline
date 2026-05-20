@@ -1,34 +1,10 @@
 /**
  * LAMBDA: accept-invite
  *
- * KEY SAFETY CHANGES FROM ORIGINAL
- * ---------------------------------
- * 1. ATOMIC INVITE CLAIM — eliminates race condition (TOCTOU)
- *    Original flow:
- *      a. Read invite, check current_uses < max_uses
- *      b. [gap — another Lambda can slip in here]
- *      c. Write new member
- *      d. Increment current_uses
- *    Two users accepting simultaneously would both pass step (a) before
- *    either reached step (d), allowing both to join even if only 1 slot remained.
- *
- *    Fixed flow:
- *      a. Attempt atomic UpdateCommand with ConditionExpression
- *         "current_uses < max_uses AND active = :true"
- *      b. If ConditionalCheckFailedException → invite is full, return 400
- *      c. On success, write member + token records
- *    Only one Lambda can win the atomic update. The loser gets a clean error.
- *
- * 2. SCAN REPLACED WITH QUERY + PAGINATION
- *    Original used ScanCommand which:
- *      - Reads every item in the entire table (expensive)
- *      - Returns max 1MB per call — silently misses items on large tables
- *    Fixed: paginated scan as safe fallback, with note to add GSI.
- *
- * 3. GREEK MEMBERSHIP EXCLUSIVITY
- *    When a user accepts an invite to a greek group, they are automatically
- *    removed from any existing greek group before joining the new one.
- *    Deactivates: member record, tokens for old group.
+ * FIX INCLUDED:
+ * - Users with an inactive/cancelled membership can rejoin
+ * - "already a member" only triggers if membership.active === true
+ * - If prior membership exists but is inactive, it is reactivated
  */
 
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
@@ -54,17 +30,34 @@ exports.handler = async (event) => {
   } catch (err) {
     return {
       statusCode: 400,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      },
       body: JSON.stringify({ error: "Invalid request body" }),
     };
   }
 
-  const { inviteCode, userId, userName, email, phoneNumber } = body;
+  const {
+    inviteCode,
+    userId,
+    userName,
+    email,
+    phoneNumber,
+    // When the caller already saw the "you're switching Greek groups" warning
+    // and the user tapped "Yes, switch", the frontend re-POSTs with this flag
+    // set to true. Without it, we return 409 GREEK_MEMBERSHIP_EXISTS so the
+    // frontend can show the warning dialog first.
+    confirmSwitch,
+  } = body;
 
   if (!inviteCode || !userId) {
     return {
       statusCode: 400,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      },
       body: JSON.stringify({ error: "Missing inviteCode or userId" }),
     };
   }
@@ -73,13 +66,10 @@ exports.handler = async (event) => {
   const tokenTableName = "Tokens";
   const now = new Date().toISOString();
   const inviteRowKey = `INVITE#${inviteCode}`;
+  const memberKey = `MEMBER#USER#${userId}`;
 
   try {
     // 1️⃣ Find invite record
-    // PREFERRED: If you add a GSI with group_data_members as PK, replace this
-    // with a QueryCommand on that GSI — faster and no pagination needed.
-    //
-    // CURRENT: Paginated scan as a safe fallback that won't silently miss items.
     let inviteItem = null;
     let lastKey = undefined;
 
@@ -99,13 +89,21 @@ exports.handler = async (event) => {
       lastKey = scanResult.LastEvaluatedKey;
     } while (!inviteItem && lastKey);
 
-    console.log("📦 [ACCEPT_INVITE] invite item found:", JSON.stringify(inviteItem || null, null, 2));
+    console.log(
+      "📦 [ACCEPT_INVITE] invite item found:",
+      JSON.stringify(inviteItem || null, null, 2)
+    );
 
     if (!inviteItem) {
       return {
         statusCode: 404,
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-        body: JSON.stringify({ error: "Invite code not found or no longer active" }),
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+        body: JSON.stringify({
+          error: "Invite code not found or no longer active",
+        }),
       };
     }
 
@@ -113,9 +111,25 @@ exports.handler = async (event) => {
     if (!groupId) {
       return {
         statusCode: 500,
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
         body: JSON.stringify({ error: "Invite record missing group_id" }),
       };
+    }
+
+    // ── SUBSCRIPTION LIFECYCLE GATE ──────────────────────────────────────────
+    // Reject invite acceptance if the group's subscription is no longer
+    // active (read_only / suspended / deleted). The group might look alive
+    // via the invite, but we don't want new members joining a workspace
+    // that's effectively dead. Legacy groups without a status field are
+    // treated as active (see writeGuard).
+    // Co-located copy under src/shared/ (was: ../../_shared/src/writeGuard).
+    const { assertGroupWritable } = require("./shared/writeGuard");
+    const guard = await assertGroupWritable(groupId);
+    if (!guard.ok) {
+      return guard.response;
     }
 
     // 2️⃣ Fetch group metadata
@@ -134,6 +148,17 @@ exports.handler = async (event) => {
       };
     }
 
+    // ✅ ADD THIS HERE
+    if (!metadataResp.Item.active) {
+      return {
+        statusCode: 400,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+        body: JSON.stringify({
+          error: "This group is no longer active",
+        }),
+      };
+    }
+
     const planType = metadataResp.Item.plan_type || "group";
     const stripeCustomerId =
       metadataResp.Item.stripe_customer_id || inviteItem.stripe_customer_id || null;
@@ -144,32 +169,47 @@ exports.handler = async (event) => {
         TableName: tableName,
         Key: {
           group_id: groupId,
-          group_data_members: `MEMBER#USER#${userId}`,
+          group_data_members: memberKey,
         },
       })
     );
 
-    if (existingMembership.Item) {
+    const membershipItem = existingMembership.Item || null;
+
+    // Only block if the membership is ACTIVE
+    if (membershipItem && membershipItem.active === true) {
       return {
         statusCode: 200,
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
         body: JSON.stringify({
           success: true,
           alreadyMember: true,
-          message: "User is already a member of this group",
+          message: "User is already an active member of this group",
           groupId,
         }),
       };
     }
 
-    // 3.5️⃣ Greek exclusivity — leave any existing greek group before joining a new one
-    // WHY: A user should never be an active member of two greek groups simultaneously.
-    // We deactivate their old greek member record and tokens here, before writing
-    // the new member record below.
+    // 3.5️⃣ Greek exclusivity — one active Greek membership per user.
+    //
+    // If the user is already in another Greek group we do NOT silently switch.
+    // Instead we return 409 GREEK_MEMBERSHIP_EXISTS so the frontend can show
+    // a confirmation dialog ("you'll be removed from <old group> if you
+    // accept this invite"). The frontend then re-POSTs with confirmSwitch=
+    // true to actually perform the switch.
+    //
+    // Special case: if the user is the OWNER of the existing Greek group,
+    // we refuse outright — leaving would orphan the admin seat on the old
+    // group. They have to transfer ownership or contact billing first.
     const isGreekGroup = groupId.toLowerCase().startsWith("greek");
 
     if (isGreekGroup) {
-      console.log("🏛️ [ACCEPT_INVITE] Greek group detected — checking for existing greek memberships");
+      console.log(
+        "🏛️ [ACCEPT_INVITE] Greek group detected — checking for existing greek memberships"
+      );
 
       const existingMembershipsResp = await dynamo.send(
         new QueryCommand({
@@ -184,64 +224,154 @@ exports.handler = async (event) => {
         })
       );
 
-      for (const membership of existingMembershipsResp.Items || []) {
-        const existingGid = membership.group_id;
-        if (!existingGid || !existingGid.toLowerCase().startsWith("greek")) continue;
-        if (existingGid === groupId) continue;
-
-        console.log(`🔄 [ACCEPT_INVITE] Leaving existing greek group: ${existingGid}`);
-
-        // Deactivate member record in old greek group
-        await dynamo.send(
-          new UpdateCommand({
-            TableName: tableName,
-            Key: {
-              group_id: existingGid,
-              group_data_members: `MEMBER#USER#${userId}`,
-            },
-            UpdateExpression: "SET active = :false, update_at = :now",
-            ExpressionAttributeValues: { ":false": false, ":now": now },
-          })
+      // Filter down to *other* active Greek memberships.
+      const existingGreek = (existingMembershipsResp.Items || []).filter((m) => {
+        const gid = m.group_id || "";
+        return (
+          gid.toLowerCase().startsWith("greek") &&
+          gid !== groupId &&
+          m.active === true
         );
-        console.log(`✅ [ACCEPT_INVITE] Deactivated member record in old greek group: ${existingGid}`);
+      });
 
-        // Deactivate all tokens for old greek group
-        const oldTokens = await dynamo.send(
-          new QueryCommand({
-            TableName: tokenTableName,
-            IndexName: "user_id-index",
-            KeyConditionExpression: "user_id = :uid",
-            FilterExpression: "group_id = :gid AND active = :true",
-            ExpressionAttributeValues: {
-              ":uid": userId,
-              ":gid": existingGid,
-              ":true": true,
+      if (existingGreek.length > 0) {
+        // If any of the existing memberships is owned by this user, refuse.
+        const ownedMembership = existingGreek.find((m) => m.is_owner === true);
+        if (ownedMembership) {
+          return {
+            statusCode: 409,
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*",
             },
-          })
-        );
+            body: JSON.stringify({
+              success: false,
+              code: "OWNER_MUST_TRANSFER_FIRST",
+              error:
+                "You're the owner of another Greek group. Transfer ownership or contact billing@nightlinecomo.com before joining a new group.",
+              existingGroupId: ownedMembership.group_id,
+            }),
+          };
+        }
 
-        for (const token of oldTokens.Items || []) {
+        // Not owner — allowed to switch, but only after explicit confirmation.
+        if (!confirmSwitch) {
+          // Fetch group name / chapter_name for each existing group so the
+          // frontend can show a meaningful warning. Non-fatal if lookup fails.
+          const existingGroups = [];
+          for (const m of existingGreek) {
+            let label = m.group_id;
+            try {
+              const gResp = await dynamo.send(
+                new GetCommand({
+                  TableName: tableName,
+                  Key: {
+                    group_id: m.group_id,
+                    group_data_members: "METADATA",
+                  },
+                })
+              );
+              label =
+                gResp.Item?.chapter_name ||
+                gResp.Item?.group_name ||
+                gResp.Item?.name ||
+                m.group_id;
+            } catch (e) {
+              console.warn(
+                `⚠️ [ACCEPT_INVITE] Could not fetch metadata for ${m.group_id}: ${e.message}`
+              );
+            }
+            existingGroups.push({ groupId: m.group_id, groupName: label });
+          }
+
+          console.log(
+            "🛑 [ACCEPT_INVITE] User already in Greek group — awaiting confirmation to switch"
+          );
+
+          return {
+            statusCode: 409,
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*",
+            },
+            body: JSON.stringify({
+              success: false,
+              code: "GREEK_MEMBERSHIP_EXISTS",
+              error:
+                "You are already a member of another Greek group. Accepting this invite will remove you from your current group.",
+              requiresConfirmation: true,
+              existingGroups,
+              newGroupId: groupId,
+            }),
+          };
+        }
+
+        // confirmSwitch === true → perform the switch by deactivating every
+        // existing active Greek membership (member row + tokens) before the
+        // rest of this lambda creates the new one.
+        for (const membership of existingGreek) {
+          const existingGid = membership.group_id;
+          console.log(
+            `🔄 [ACCEPT_INVITE] Confirmed switch — leaving existing greek group: ${existingGid}`
+          );
+
           await dynamo.send(
             new UpdateCommand({
-              TableName: tokenTableName,
-              Key: { token_id: token.token_id, user_id: token.user_id },
-              UpdateExpression: "SET active = :false, ended_at = :now",
-              ExpressionAttributeValues: { ":false": false, ":now": now },
+              TableName: tableName,
+              Key: {
+                group_id: existingGid,
+                group_data_members: `MEMBER#USER#${userId}`,
+              },
+              UpdateExpression:
+                "SET active = :false, isCancelled = :true, update_at = :now, switched_out_at = :now",
+              ExpressionAttributeValues: {
+                ":false": false,
+                ":true": true,
+                ":now": now,
+              },
             })
           );
+
+          const oldTokens = await dynamo.send(
+            new QueryCommand({
+              TableName: tokenTableName,
+              IndexName: "user_id-index",
+              KeyConditionExpression: "user_id = :uid",
+              FilterExpression: "group_id = :gid AND active = :true",
+              ExpressionAttributeValues: {
+                ":uid": userId,
+                ":gid": existingGid,
+                ":true": true,
+              },
+            })
+          );
+
+          for (const token of oldTokens.Items || []) {
+            await dynamo.send(
+              new UpdateCommand({
+                TableName: tokenTableName,
+                Key: {
+                  token_id: token.token_id,
+                  user_id: token.user_id,
+                },
+                UpdateExpression:
+                  "SET active = :false, ended_at = :now",
+                ExpressionAttributeValues: {
+                  ":false": false,
+                  ":now": now,
+                },
+              })
+            );
+          }
+
+          console.log(
+            `✅ [ACCEPT_INVITE] Deactivated member + ${
+              oldTokens.Items?.length || 0
+            } token(s) for old Greek group ${existingGid}`
+          );
         }
-        console.log(`✅ [ACCEPT_INVITE] Deactivated ${oldTokens.Items?.length || 0} token(s) for old greek group: ${existingGid}`);
       }
     }
-
-    // ── SAFETY: Atomic invite claim ───────────────────────────────────────────
-    // WHY: Between reading the invite (step 1) and writing the member record
-    // (step 5), another Lambda instance could accept the same invite code.
-    // If max_uses is 1 and two users accept simultaneously, both would read
-    // current_uses=0 < max_uses=1 and both would proceed. By moving the
-    // increment to an atomic UpdateCommand with a ConditionExpression, only
-    // one Lambda can succeed — the second gets ConditionalCheckFailedException
-    // and returns a clean "invite full" error. No over-subscription possible.
 
     // 4️⃣ Atomically claim a slot on the invite
     const currentUses = Number(inviteItem.current_uses || 0);
@@ -256,8 +386,6 @@ exports.handler = async (event) => {
           Key: { group_id: groupId, group_data_members: inviteRowKey },
           UpdateExpression:
             "SET current_uses = :newUses, update_at = :now, used = :used",
-          // This condition is the atomic race-condition guard:
-          // Only succeeds if current_uses is still less than max_uses at write time
           ConditionExpression:
             "active = :active AND (attribute_not_exists(max_uses) OR current_uses < max_uses)",
           ExpressionAttributeValues: {
@@ -274,7 +402,10 @@ exports.handler = async (event) => {
         console.log("⚠️ [ACCEPT_INVITE] Invite is full or inactive — race condition caught");
         return {
           statusCode: 400,
-          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          },
           body: JSON.stringify({
             error: "This invite has reached its usage limit or is no longer active",
           }),
@@ -283,28 +414,63 @@ exports.handler = async (event) => {
       throw err;
     }
 
-    // 5️⃣ Write member record
-    await dynamo.send(
-      new PutCommand({
-        TableName: tableName,
-        Item: {
-          group_id: groupId,
-          group_data_members: `MEMBER#USER#${userId}`,
-          user_id: userId,
-          username: userName || "Unknown User",
-          email: email || null,
-          phone_number: phoneNumber || null,
-          active: true,
-          is_owner: false,
-          isCancelled: false,
-          manually_added: false,
-          created_at: now,
-          update_at: now,
-          stripe_customer_id: stripeCustomerId,
-        },
-      })
-    );
-    console.log("✅ [ACCEPT_INVITE] Member record written");
+    // 5️⃣ Write or reactivate member record
+    if (membershipItem && membershipItem.active === false) {
+      console.log("🔄 [ACCEPT_INVITE] Reactivating previously inactive membership");
+
+      await dynamo.send(
+        new UpdateCommand({
+          TableName: tableName,
+          Key: {
+            group_id: groupId,
+            group_data_members: memberKey,
+          },
+          UpdateExpression: `
+            SET active = :true,
+                isCancelled = :false,
+                username = :username,
+                email = :email,
+                phone_number = :phone,
+                manually_added = :manuallyAdded,
+                stripe_customer_id = :stripeCustomerId,
+                update_at = :now
+          `,
+          ExpressionAttributeValues: {
+            ":true": true,
+            ":false": false,
+            ":username": userName || membershipItem.username || "Unknown User",
+            ":email": email || membershipItem.email || null,
+            ":phone": phoneNumber || membershipItem.phone_number || null,
+            ":manuallyAdded": false,
+            ":stripeCustomerId": stripeCustomerId,
+            ":now": now,
+          },
+        })
+      );
+    } else {
+      await dynamo.send(
+        new PutCommand({
+          TableName: tableName,
+          Item: {
+            group_id: groupId,
+            group_data_members: memberKey,
+            user_id: userId,
+            username: userName || "Unknown User",
+            email: email || null,
+            phone_number: phoneNumber || null,
+            active: true,
+            is_owner: false,
+            isCancelled: false,
+            manually_added: false,
+            created_at: now,
+            update_at: now,
+            stripe_customer_id: stripeCustomerId,
+          },
+        })
+      );
+    }
+
+    console.log("✅ [ACCEPT_INVITE] Member record written/reactivated");
 
     // 6️⃣ Write token record
     const tokenId = crypto.randomBytes(16).toString("hex");
@@ -336,13 +502,17 @@ exports.handler = async (event) => {
         new UpdateCommand({
           TableName: tableName,
           Key: { group_id: groupId, group_data_members: "METADATA" },
-          UpdateExpression: "SET current_uses = if_not_exists(current_uses, :zero) + :inc, update_at = :now",
-          ExpressionAttributeValues: { ":inc": 1, ":zero": 0, ":now": now },
+          UpdateExpression:
+            "SET current_uses = if_not_exists(current_uses, :zero) + :inc, update_at = :now",
+          ExpressionAttributeValues: {
+            ":inc": 1,
+            ":zero": 0,
+            ":now": now,
+          },
         })
       );
       console.log("✅ [ACCEPT_INVITE] Metadata current_uses incremented");
     } catch (err) {
-      // Non-fatal: metadata count is informational
       console.warn("⚠️ [ACCEPT_INVITE] Could not update metadata count:", err.message);
     }
 
@@ -350,21 +520,35 @@ exports.handler = async (event) => {
 
     return {
       statusCode: 200,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      },
       body: JSON.stringify({
         success: true,
         message: "Successfully joined the group",
         groupId,
         userId,
         tokenId,
+        rejoined: !!membershipItem,
+        // True only for Greek joins where the caller had confirmed the switch
+        // — lets the frontend render a different success toast ("Switched to
+        // <group>") vs. a fresh-join toast.
+        switched: !!(isGreekGroup && confirmSwitch),
       }),
     };
   } catch (err) {
     console.error("❌ [ACCEPT_INVITE] Error:", err);
     return {
       statusCode: 500,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-      body: JSON.stringify({ error: "Failed to join group", details: err?.message }),
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      },
+      body: JSON.stringify({
+        error: "Failed to join group",
+        details: err?.message,
+      }),
     };
   }
 };

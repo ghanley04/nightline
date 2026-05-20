@@ -1,516 +1,168 @@
-/**
- * LAMBDA: stripeWebhook
- *
- * WHY THIS FILE EXISTS
- * --------------------
- * This is the ONLY place Stripe tells us "a payment actually succeeded."
- * Every membership write must flow through here — never trust the client.
- *
- * KEY SAFETY CHANGES FROM ORIGINAL
- * ---------------------------------
- * 1. IDEMPOTENCY GUARD (top of handler)
- *    Stripe retries webhooks on any non-2xx or timeout.
- *    Without a guard, a retry after a partial write leaves the user with
- *    duplicate memberships or, worse, a canceled old plan and no new one.
- *    We write the Stripe event ID to ProcessedStripeEvents ATOMICALLY
- *    (ConditionExpression: attribute_not_exists) before touching anything else.
- *    If two Lambda instances race on the same event, only one wins.
- *
- * 2. WRITE NEW RECORDS BEFORE CANCELING OLD SUBSCRIPTION
- *    Original order:  cancel Stripe → deactivate old DB row → write new DB row
- *    Safe order:      write new DB row → deactivate old DB row → cancel Stripe
- *    If any DB write fails in the safe order, the user still has their old plan.
- *    Stripe is only touched last, after all DB work is confirmed.
- *
- * 3. line_items EXPANSION
- *    Stripe does NOT include line_items in the webhook payload by default.
- *    We retrieve the session with expand=['line_items'] to get the real priceId
- *    and therefore the real max_members from price metadata.
- *    Without this, max_users was ALWAYS "1" regardless of the plan purchased.
- *
- * 4. INVITE RECORD DEACTIVATION
- *    When deactivating an old membership, all associated INVITE# records are
- *    also set to active = false so they can no longer be used to join the
- *    old (now-canceled) group.
- *
- * 5. GREEK MEMBERSHIP EXCLUSIVITY
- *    When a user purchases a greek plan, any existing greek membership is
- *    deactivated regardless of tier comparison — a user may only belong to
- *    one greek group at a time.
- */
-
-const {
-  DynamoDBClient,
-  PutItemCommand,
-  UpdateItemCommand,
-  QueryCommand,
-  GetItemCommand,
-} = require("@aws-sdk/client-dynamodb");
-const { DynamoDBDocumentClient, PutCommand, GetCommand } = require("@aws-sdk/lib-dynamodb");
-const Stripe = require("stripe");
-const crypto = require("crypto");
+const Stripe = require('stripe');
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY_TEST);
 const {
   CognitoIdentityProviderClient,
+  AdminGetUserCommand,
   AdminUpdateUserAttributesCommand,
-} = require("@aws-sdk/client-cognito-identity-provider");
+  ListUsersCommand,
+} = require('@aws-sdk/client-cognito-identity-provider');
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY_TEST);
-const rawClient = new DynamoDBClient({});
-const dynamo = new DynamoDBClient({});
-const docClient = DynamoDBDocumentClient.from(rawClient);
-const cognito = new CognitoIdentityProviderClient({ region: "us-east-2" });
-
+const cognito = new CognitoIdentityProviderClient({ region: 'us-east-2' });
 const USER_POOL_ID = process.env.USER_POOL_ID;
-const PROCESSED_EVENTS_TABLE = "ProcessedStripeEvents";
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-async function updateIfExists({ table, key, update, values }) {
-  const exists = await dynamo.send(
-    new GetItemCommand({ TableName: table, Key: key })
-  );
-  if (!exists.Item) {
-    console.log("ℹ️ Skipping update — record does not exist:", key);
-    return false;
-  }
-  await dynamo.send(
-    new UpdateItemCommand({
-      TableName: table,
-      Key: key,
-      UpdateExpression: update,
-      ExpressionAttributeValues: values,
-    })
-  );
-  console.log("✅ Updated record:", key);
-  return true;
-}
-
-async function cancelStripeSubscriptions(customerId) {
-  try {
-    if (!customerId || customerId.startsWith("guest_")) {
-      console.log("ℹ️ Skipping Stripe cancellation — guest or missing customer");
-      return [];
-    }
-    const subscriptions = await stripe.subscriptions.list({
-      customer: customerId,
-      status: "active",
-      limit: 10,
-    });
-    const canceled = [];
-    for (const sub of subscriptions.data) {
-      await stripe.subscriptions.cancel(sub.id);
-      canceled.push(sub.id);
-      console.log(`✅ Canceled Stripe subscription: ${sub.id}`);
-    }
-    return canceled;
-  } catch (err) {
-    console.error("❌ Error canceling Stripe subscriptions:", err);
-    return [];
-  }
-}
-
-function getPlanTier(groupId) {
-  const id = (groupId || "").toLowerCase();
-  if (id.includes("individual")) return { type: "individual", tier: 1 };
-  if (id.includes("group")) return { type: "group", tier: 2 };
-  if (id.includes("greek")) return { type: "greek", tier: 3 };
-  return { type: "unknown", tier: 0 };
-}
-
-// Deactivate all INVITE# records for a given group
-async function deactivateGroupInvites(tableName, groupId, createdAt) {
-  try {
-    const inviteQuery = await dynamo.send(
-      new QueryCommand({
-        TableName: tableName,
-        KeyConditionExpression:
-          "group_id = :gid AND begins_with(group_data_members, :prefix)",
-        FilterExpression: "active = :true",
-        ExpressionAttributeValues: {
-          ":gid": { S: groupId },
-          ":prefix": { S: "INVITE#" },
-          ":true": { BOOL: true },
-        },
-      })
-    );
-
-    for (const invite of inviteQuery.Items || []) {
-      await dynamo.send(
-        new UpdateItemCommand({
-          TableName: tableName,
-          Key: {
-            group_id: invite.group_id,
-            group_data_members: invite.group_data_members,
-          },
-          UpdateExpression: "SET active = :false, update_at = :now",
-          ExpressionAttributeValues: {
-            ":false": { BOOL: false },
-            ":now": { S: createdAt },
-          },
-        })
-      );
-    }
-    console.log(
-      `✅ Deactivated ${inviteQuery.Items?.length || 0} invite record(s) for group: ${groupId}`
-    );
-  } catch (err) {
-    console.warn("⚠️ Could not deactivate invite records:", err.message);
-  }
-}
-
-// ─── Handler ─────────────────────────────────────────────────────────────────
 
 exports.handler = async (event) => {
-  console.log("📢 Received event:", JSON.stringify(event, null, 2));
-
-  if (!event.headers) {
-    return { statusCode: 400, body: JSON.stringify({ error: "No headers received" }) };
-  }
-
-  const sig = event.headers["stripe-signature"] || event.headers["Stripe-Signature"];
-  let bodyRaw = event.body;
-  if (event.isBase64Encoded) {
-    bodyRaw = Buffer.from(bodyRaw, "base64").toString("utf8");
-  }
-
-  // Verify Stripe webhook signature
-  let stripeEvent;
   try {
-    stripeEvent = stripe.webhooks.constructEvent(
-      bodyRaw,
-      sig,
-      process.env.STRIPE_WEBHOOK_SECRET
-    );
-    console.log("🟢 Stripe webhook verified:", stripeEvent.type);
-  } catch (err) {
-    console.error("❌ Invalid Stripe signature:", err.message);
-    return { statusCode: 400, body: "Webhook Error" };
-  }
+    console.log('Stripe key is set?', !!process.env.STRIPE_SECRET_KEY_TEST);
+    console.log('📦 FULL EVENT:', JSON.stringify(event, null, 2));
+    console.log('🟣 isBase64Encoded:', event.isBase64Encoded);
 
-  // Only handle checkout completions
-  if (stripeEvent.type !== "checkout.session.completed") {
-    return { statusCode: 200, body: JSON.stringify({ received: true }) };
-  }
-
-  // ── SAFETY STEP 1: Idempotency guard ─────────────────────────────────────
-  // WHY: Stripe will retry this webhook if we return non-2xx or time out.
-  // Without this, a retry after a partial write can double-create memberships
-  // or cancel a subscription twice. The ConditionExpression makes the write
-  // atomic — two Lambda instances racing on the same eventId can't both win.
-  try {
-    await docClient.send(
-      new PutCommand({
-        TableName: PROCESSED_EVENTS_TABLE,
-        Item: {
-          event_id: stripeEvent.id,
-          processed_at: new Date().toISOString(),
-          ttl: Math.floor(Date.now() / 1000) + 172800,
-        },
-        ConditionExpression: "attribute_not_exists(event_id)",
-      })
-    );
-    console.log("✅ Idempotency record written for event:", stripeEvent.id);
-  } catch (err) {
-    if (err.name === "ConditionalCheckFailedException") {
-      console.log("⚠️ Duplicate webhook event — already processed:", stripeEvent.id);
-      return { statusCode: 200, body: JSON.stringify({ received: true, duplicate: true }) };
-    }
-    console.error("❌ Failed to write idempotency record:", err);
-    return { statusCode: 500, body: "Internal error" };
-  }
-
-  const session = stripeEvent.data.object;
-  const userId = session.metadata?.userId;
-  const groupId = session.metadata?.groupId;
-  const customerId = session.customer;
-
-  if (!userId || !groupId) {
-    console.error("❌ Missing userId or groupId in metadata");
-    return { statusCode: 400, body: JSON.stringify({ error: "Missing metadata" }) };
-  }
-
-  // ── SAFETY STEP 2: Expand line_items to get real priceId ─────────────────
-  // WHY: Stripe webhooks do NOT include line_items by default.
-  // Without this, max_users silently defaults to "1" for every plan.
-  let maxUsers = "1";
-  try {
-    const fullSession = await stripe.checkout.sessions.retrieve(session.id, {
-      expand: ["line_items"],
-    });
-    const priceId = fullSession.line_items?.data?.[0]?.price?.id;
-    if (priceId) {
-      const price = await stripe.prices.retrieve(priceId);
-      maxUsers = price.metadata?.max_members || "1";
-      console.log(`🔸 max_members from price ${priceId}:`, maxUsers);
-    }
-  } catch (err) {
-    console.error("⚠️ Could not fetch line_items — defaulting max_users to 1:", err.message);
-  }
-
-  const groupIdLower = groupId.toLowerCase();
-  const isNightPass = groupIdLower.includes("night");
-  const isBusPass = groupIdLower.includes("bus");
-  const isOneTimePass = isNightPass || isBusPass;
-  const isGreekPlan = groupIdLower.startsWith("greek");
-
-  // Resolve final customer ID
-  let finalCustomerId = customerId;
-  if (!finalCustomerId && session.payment_intent) {
+    let body = {};
     try {
-      const pi = await stripe.paymentIntents.retrieve(session.payment_intent);
-      finalCustomerId = pi.customer;
-    } catch (err) {
-      console.warn("⚠️ Could not retrieve customer from payment_intent:", err.message);
+      if (event.isBase64Encoded) {
+        const decodedBody = Buffer.from(event.body, 'base64').toString('utf-8');
+        console.log('🔓 Decoded body:', decodedBody);
+        body = JSON.parse(decodedBody);
+      } else {
+        body = typeof event.body === 'string' ? JSON.parse(event.body) : event.body;
+      }
+    } catch (e) {
+      console.error('❌ Failed to parse event body:', e, event.body);
     }
-  }
-  if (!finalCustomerId) {
-    finalCustomerId = `guest_${crypto.randomBytes(8).toString("hex")}`;
-    console.log("⚠️ Using guest placeholder:", finalCustomerId);
-  }
 
-  // Save stripe_customer_id to Cognito
-  if (userId && finalCustomerId && !finalCustomerId.startsWith("guest_")) {
+    console.log('🟢 Parsed body:', body);
+    const { priceId, userId, groupType } = body || {};
+    console.log('🔸 Final extracted values:', { priceId, userId, groupType });
+
+    // 1️⃣ Fetch Cognito user by sub (userId is the Cognito sub, not the username)
+    let stripeCustomerId = null;
+    let userEmail = null;
+    let cognitoUsername = null; // the actual username needed for AdminUpdateUserAttributes
+
     try {
-      await cognito.send(
-        new AdminUpdateUserAttributesCommand({
-          UserPoolId: USER_POOL_ID,
-          Username: userId,
-          UserAttributes: [{ Name: "custom:stripe_customer_id", Value: finalCustomerId }],
-        })
-      );
-      console.log("✅ Saved stripe_customer_id to Cognito");
+      const { ListUsersCommand } = require('@aws-sdk/client-cognito-identity-provider');
+      const listResult = await cognito.send(new ListUsersCommand({
+        UserPoolId: USER_POOL_ID,
+        Filter: `sub = "${userId}"`,
+        Limit: 1,
+      }));
+
+      const cognitoUser = listResult.Users?.[0];
+      if (cognitoUser) {
+        cognitoUsername = cognitoUser.Username;
+        const attrs = {};
+        cognitoUser.Attributes.forEach(a => attrs[a.Name] = a.Value);
+        stripeCustomerId = attrs['custom:stripe_customer_id'] || null;
+        userEmail = attrs['email'] || null;
+        console.log('👤 Cognito user found. Username:', cognitoUsername, '| Existing stripe_customer_id:', stripeCustomerId);
+      } else {
+        console.warn('⚠️ No Cognito user found for sub:', userId);
+      }
     } catch (err) {
-      console.error("⚠️ Failed to save stripe_customer_id to Cognito:", err.message);
-    }
-  }
-
-  const tableName = "GroupData-dev";
-  const tokenTableName = "Tokens";
-  const createdAt = new Date().toISOString();
-  const inviteCode = crypto.randomBytes(6).toString("hex");
-  const inviteLink = `https://nightline.app/invite/${inviteCode}`;
-  const newPlan = getPlanTier(groupId);
-
-  try {
-    // Query existing active memberships for this user
-    const membershipsQuery = await dynamo.send(
-      new QueryCommand({
-        TableName: tableName,
-        IndexName: "user_id-index",
-        KeyConditionExpression: "user_id = :userId",
-        FilterExpression: "active = :true",
-        ExpressionAttributeValues: {
-          ":userId": { S: userId },
-          ":true": { BOOL: true },
-        },
-      })
-    );
-
-    const activeMemberships = membershipsQuery.Items || [];
-    const membershipsToDeactivate = [];
-
-    for (const membership of activeMemberships) {
-      const existingGroupId = membership.group_id.S;
-      const existingPlan = getPlanTier(existingGroupId);
-      const existingGroupIdLower = existingGroupId.toLowerCase();
-      const isExistingOneTimePass =
-        existingGroupIdLower.includes("night") || existingGroupIdLower.includes("bus");
-      const isExistingGreek = existingGroupIdLower.startsWith("greek");
-      const existingStripeCustomerId = membership.stripe_customer_id?.S;
-
-      if (existingGroupId === groupId) continue;
-      if (isOneTimePass) continue;
-      if (isExistingOneTimePass) continue;
-
-      // Greek exclusivity: buying any greek plan deactivates ALL existing greek memberships
-      if (isGreekPlan && isExistingGreek) {
-        membershipsToDeactivate.push({ existingGroupId, existingPlan, existingStripeCustomerId });
-        continue;
-      }
-
-      if (newPlan.tier >= existingPlan.tier) {
-        membershipsToDeactivate.push({ existingGroupId, existingPlan, existingStripeCustomerId });
-      } else if (newPlan.tier < existingPlan.tier) {
-        // Downgrade: reduce max_users on existing plan
-        const currentMetadata = membership.metadata?.M || {};
-        const currentMaxUsers = currentMetadata.max_users?.S || "1";
-        const newMaxUsers = String(Math.max(1, parseInt(currentMaxUsers) - 1));
-        await updateIfExists({
-          table: tableName,
-          key: { group_id: { S: existingGroupId }, group_data_members: { S: "METADATA" } },
-          update: "SET metadata.max_users = :newMax, update_at = :now",
-          values: { ":newMax": { S: newMaxUsers }, ":now": { S: createdAt } },
-        });
-      }
+      console.error('⚠️ Failed to fetch Cognito user:', err.message);
     }
 
-    // ── SAFETY STEP 3: Write NEW records BEFORE touching old ones ─────────────
-    // WHY: If we canceled the old subscription first and then a DB write failed,
-    // the user would have no active membership but already paid for the new one.
-    // By writing the new membership first, the user always has at least one
-    // valid plan. The worst case on failure is they temporarily have two plans,
-    // which is far better than having none.
-
-    // Write new MEMBER record
-    await dynamo.send(
-      new PutItemCommand({
-        TableName: tableName,
-        Item: {
-          group_id: { S: groupId },
-          group_data_members: { S: `MEMBER#USER#${userId}` },
-          user_id: { S: userId },
-          stripe_customer_id: { S: finalCustomerId },
-          created_at: { S: createdAt },
-          update_at: { S: createdAt },
-          active: { BOOL: true },
-          is_owner: { BOOL: true },
-          isCancelled: { BOOL: false },
-          manually_added: { BOOL: false },
-        },
-      })
-    );
-    console.log("✅ New MEMBER record written");
-
-    // Write new METADATA record
-    let planType = newPlan.type;
-    if (isNightPass) planType = "night";
-    if (isBusPass) planType = "bus";
-
-    await dynamo.send(
-      new PutItemCommand({
-        TableName: tableName,
-        Item: {
-          group_id: { S: groupId },
-          group_data_members: { S: "METADATA" },
-          created_at: { S: createdAt },
-          update_at: { S: createdAt },
-          active: { BOOL: true },
-          max_users: { S: isOneTimePass ? "1" : maxUsers },
-          plan_type: { S: planType },
-          stripe_customer_id: { S: finalCustomerId },
-          owner_user_id: { S: userId },
-        },
-      })
-    );
-    console.log("✅ New METADATA record written");
-
-    // Write new TOKEN record
-    const tokenId = crypto.randomBytes(16).toString("hex");
-    await dynamo.send(
-      new PutItemCommand({
-        TableName: tokenTableName,
-        Item: {
-          token_id: { S: tokenId },
-          user_id: { S: userId },
-          group_id: { S: groupId },
-          stripe_customer_id: { S: finalCustomerId },
-          created_at: { S: createdAt },
-          update_at: { S: createdAt },
-          active: { BOOL: true },
-          is_owner: { BOOL: true },
-        },
-      })
-    );
-    console.log("✅ New TOKEN record written");
-
-    // Write invite code for group/greek plans
-    if (
-      !isOneTimePass &&
-      (groupId.toLowerCase().includes("greek") || groupId.toLowerCase().includes("group"))
-    ) {
-      await dynamo.send(
-        new PutItemCommand({
-          TableName: tableName,
-          Item: {
-            group_id: { S: groupId },
-            group_data_members: { S: `INVITE#${inviteCode}` },
-            invite_code: { S: inviteCode },
-            created_by: { S: userId },
-            created_at: { S: createdAt },
-            update_at: { S: createdAt },
-            used: { BOOL: false },
-            invite_link: { S: inviteLink },
-            active: { BOOL: true },
-            stripe_customer_id: { S: finalCustomerId },
-            current_uses: { N: "0" },
-          },
-        })
-      );
-      console.log("✅ Invite record written");
-    }
-
-    // NOW deactivate old memberships and cancel old Stripe subscriptions
-    for (const { existingGroupId, existingStripeCustomerId } of membershipsToDeactivate) {
-      console.log(`🔄 Deactivating old membership: ${existingGroupId}`);
-
-      await updateIfExists({
-        table: tableName,
-        key: {
-          group_id: { S: existingGroupId },
-          group_data_members: { S: `MEMBER#USER#${userId}` },
-        },
-        update: "SET active = :false, isCancelled = :true, update_at = :now",
-        values: {
-          ":false": { BOOL: false },
-          ":true": { BOOL: true },
-          ":now": { S: createdAt },
-        },
+    // 2️⃣ If no existing Stripe customer, create one and save back to Cognito
+    if (!stripeCustomerId) {
+      console.log('🆕 No existing Stripe customer, creating one...');
+      const customer = await stripe.customers.create({
+        email: userEmail,
+        metadata: { userId },
       });
+      stripeCustomerId = customer.id;
+      console.log('✅ Created Stripe customer:', stripeCustomerId);
 
-      await updateIfExists({
-        table: tableName,
-        key: {
-          group_id: { S: existingGroupId },
-          group_data_members: { S: "METADATA" },
-        },
-        update: "SET active = :false, update_at = :now",
-        values: { ":false": { BOOL: false }, ":now": { S: createdAt } },
-      });
-
-      // Deactivate all INVITE# records for the old group
-      await deactivateGroupInvites(tableName, existingGroupId, createdAt);
-
-      // Deactivate old tokens
-      const oldTokensQuery = await dynamo.send(
-        new QueryCommand({
-          TableName: tokenTableName,
-          IndexName: "user_id-index",
-          KeyConditionExpression: "user_id = :userId",
-          FilterExpression:
-            "group_id = :oldGroup AND NOT contains(group_id, :nightStr) AND NOT contains(group_id, :busStr) AND active = :true",
-          ExpressionAttributeValues: {
-            ":userId": { S: userId },
-            ":oldGroup": { S: existingGroupId },
-            ":nightStr": { S: "night" },
-            ":busStr": { S: "bus" },
-            ":true": { BOOL: true },
-          },
-        })
-      );
-
-      for (const token of oldTokensQuery.Items || []) {
-        await updateIfExists({
-          table: tokenTableName,
-          key: { token_id: token.token_id, user_id: token.user_id },
-          update: "SET active = :false, ended_at = :now",
-          values: { ":false": { BOOL: false }, ":now": { S: createdAt } },
-        });
+      if (cognitoUsername) {
+        try {
+          await cognito.send(new AdminUpdateUserAttributesCommand({
+            UserPoolId: USER_POOL_ID,
+            Username: cognitoUsername,
+            UserAttributes: [
+              { Name: 'custom:stripe_customer_id', Value: stripeCustomerId },
+            ],
+          }));
+          console.log('✅ Saved stripe_customer_id to Cognito:', stripeCustomerId);
+        } catch (err) {
+          console.error('⚠️ Failed to save stripe_customer_id to Cognito:', err.message);
+        }
+      } else {
+        console.warn('⚠️ No cognitoUsername available — cannot save stripe_customer_id to Cognito');
       }
-
-      // Cancel Stripe LAST — only after all DB work succeeded
-      if (existingStripeCustomerId) {
-        const canceled = await cancelStripeSubscriptions(existingStripeCustomerId);
-        console.log(`✅ Canceled ${canceled.length} Stripe subscription(s)`);
-      }
+    } else {
+      console.log('♻️ Reusing existing Stripe customer:', stripeCustomerId);
     }
 
-    console.log("✅ Successfully processed subscription change");
-    return { statusCode: 200, body: JSON.stringify({ success: true, inviteLink }) };
-  } catch (err) {
-    console.error("❌ Error processing subscription:", err);
+    // 3️⃣ Generate a new unique groupId
+    const generateGroupId = (type = 'group') => {
+      const timestamp = Date.now().toString(36);
+      const random = Math.random().toString(36).substr(2, 6);
+      return `${type}_${timestamp}${random}`;
+    };
+    const groupId = generateGroupId(groupType);
+
+    // 4️⃣ Retrieve price and build line item
+    const price = await stripe.prices.retrieve(priceId);
+    const isSubscription = !!price.recurring;
+    const lineItem = { price: priceId };
+    if (price.recurring?.usage_type !== 'metered') {
+      lineItem.quantity = 1;
+    }
+
+    // 5️⃣ Create Stripe Checkout session
+    const sessionParams = {
+      customer: stripeCustomerId,
+      mode: isSubscription ? 'subscription' : 'payment',
+      payment_method_types: ['card'],
+      line_items: [lineItem],
+      success_url: `https://nightline.app/payment/success?session_id={CHECKOUT_SESSION_ID}&status=success`,
+      cancel_url: `https://nightline.app/payment/cancel?status=cancel`,
+      metadata: {
+        userId,
+        groupId,
+        groupType,
+      },
+    };
+
+    // For subscription mode, also stamp the same metadata onto the
+    // Subscription object itself (not just the Session). deleteMembership
+    // uses sub.metadata.groupId to figure out which subscription belongs to
+    // which group when no stored subscription_id is available, so without
+    // this fallback we'd be back to nuking every active sub on the customer.
+    if (isSubscription) {
+      sessionParams.subscription_data = {
+        metadata: {
+          userId,
+          groupId,
+          groupType,
+        },
+      };
+    }
+
+    // ✅ In payment mode, Stripe does NOT attach the customer to the session by default.
+    // customer_update forces it to save the payment method to the customer object,
+    // which also ensures session.customer is populated in the webhook.
+    if (!isSubscription) {
+      sessionParams.customer_update = { name: 'auto' };
+    }
+
+    const session = await stripe.checkout.sessions.create(sessionParams);
+
+    console.log('✅ Stripe session created:', session.id);
+
+    return {
+      statusCode: 200,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': '*',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ url: session.url, groupId }),
+    };
+  } catch (error) {
+    console.error('Stripe error:', error);
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: "Error processing subscription change" }),
+      headers: { 'Access-Control-Allow-Origin': '*' },
+      body: JSON.stringify({ error: error.message }),
     };
   }
 };

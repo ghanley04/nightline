@@ -23,8 +23,15 @@ export default function AppLinkHandler() {
 
       const [route, token] = path.split('/');
 
+      // Invite links no longer auto-join. The user experience is now:
+      //   - tap the link (or open the app some other way)
+      //   - go to the Plans tab
+      //   - tap "Have an invite code?" and type the code
+      // So any deep link beginning with /invite/... simply drops the user on
+      // the Plans tab. The `token` from the URL is intentionally ignored —
+      // we want the user to type it in explicitly.
       if (route === 'invite' && token) {
-        router.push(`/invite/${token}`);
+        router.push('/(tabs)/plans');
       }
     };
 

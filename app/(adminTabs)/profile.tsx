@@ -1,8 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Alert, Switch, TextInput, Modal } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Alert, Switch, TextInput, Modal, Linking } from 'react-native';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { User, Mail, Phone, Bell, CreditCard, Camera, MapPin } from 'lucide-react-native';
+import { User, Mail, Phone, Bell, CreditCard, Camera, MapPin /*, UserCheck, AlertTriangle */ } from 'lucide-react-native';
+// NOTE: UserCheck + AlertTriangle are imported by the transfer-ownership UI,
+// which is currently disabled. Re-add them to the import when re-enabling.
 import Card from '@/components/Card';
 import Button from '@/components/Button';
 import colors from '../../constants/colors';
@@ -20,7 +22,7 @@ export async function getUserAttributes() {
     const userAttributes = await fetchUserAttributes();
     return userAttributes;
   } catch (error) {
-    console.error('Error fetching user attributes:', error);
+    // console.error('Error fetching user attributes:', error);
     return null;
   }
 }
@@ -34,8 +36,35 @@ export default function ProfileScreen() {
   const [attributes, setAttributes] = useState<Partial<Record<UserAttributeKey, string>> | null>(null);
   const firstName = attributes?.given_name || '';
   const lastName = attributes?.family_name || '';
-  const [passes, setPasses] = useState<{ groupId: string; id: string; tokenId: string }[]>([]);
+  const [passes, setPasses] = useState<{ groupId: string; id: string; tokenId: string; isOwner?: boolean }[]>([]);
   const [isEditing, setIsEditing] = useState(false);
+
+  
+  // --- TRANSFER OWNERSHIP (TEMPORARILY DISABLED) ----------------------------
+  // The transfer-ownership modal is commented out for the first release. The
+  // backend lambdas (transferGroupOwnsership, acceptTransfer) are still in
+  // place and will work once this UI is re-enabled. Uncomment the state, the
+  // helper functions below, the Transfer button in the passes map, and the
+  // Transfer Modal JSX to bring the flow back.
+  //
+  // const [transferModal, setTransferModal] = useState<{
+  //   visible: boolean;
+  //   groupId: string | null;
+  //   path: 'A' | 'B' | null;
+  //   newOwnerUsername: string;
+  //   newOwnerEmail: string;
+  //   accepted: boolean;
+  //   submitting: boolean;
+  // }>({
+  //   visible: false,
+  //   groupId: null,
+  //   path: null,
+  //   newOwnerUsername: '',
+  //   newOwnerEmail: '',
+  //   accepted: false,
+  //   submitting: false,
+  // });
+  // --------------------------------------------------------------------------
   const [draftAttributes, setDraftAttributes] = useState<Partial<Record<UserAttributeKey, string>> | null>(null);
   const fullName = (firstName && lastName)
     ? `${firstName} ${lastName}`
@@ -290,8 +319,132 @@ export default function ProfileScreen() {
     timestamp?: string;
   }
 
+  // Pull a useful error message out of an Amplify post() rejection.
+  const parseAmplifyError = (error: unknown, fallback = 'Unknown error occurred') => {
+    if (typeof error === 'object' && error !== null) {
+      const err = error as any;
+      if (err._response?.body) {
+        try {
+          const bodyError = typeof err._response.body === 'string'
+            ? JSON.parse(err._response.body) : err._response.body;
+          return bodyError.error || bodyError.message || fallback;
+        } catch {
+          return typeof err._response.body === 'string' ? err._response.body : fallback;
+        }
+      }
+      if (err.message) return err.message;
+    }
+    if (error instanceof Error) return error.message;
+    return fallback;
+  };
+
+  interface DeleteMembershipFlowResponse {
+    success: boolean;
+    error?: string;
+    code?: string;
+    mode?: 'leave' | 'owner_delete' | 'cancel';
+    canceledSubscriptions?: string[];
+    stripeSubscriptions?: { id: string; cancel_at: number | null; current_period_end: number }[];
+    expiresAt?: string | null;
+    message?: string;
+    timestamp?: string;
+  }
+
+  // GREEK — non-owner member leaves the group. Only deactivates their own
+  // MEMBER row + tokens; leaves METADATA, Stripe, and other members alone.
+  const leaveGreekMembership = async (groupId: string) => {
+    if (!groupId) return;
+    Alert.alert(
+      'Leave this group?',
+      "You'll lose access to this Greek pass right away. The group itself and the billing owner's subscription are unaffected.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Leave',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const response = await post({
+                apiName: 'apiNightline',
+                path: '/delete-membership',
+                options: { body: { userId: user.userId, groupId, mode: 'leave' } },
+              });
+              const { body } = await response.response;
+              const result = (await body.json()) as unknown as DeleteMembershipFlowResponse;
+              if (result.success === false) {
+                Alert.alert('Could not leave', result.error || 'Please try again.');
+                return;
+              }
+              await new Promise(r => setTimeout(r, 800));
+              await fetchMembershipTokens();
+              Alert.alert("You've left", "You're no longer in this group.");
+            } catch (error) {
+              Alert.alert('Could not leave', parseAmplifyError(error, 'Failed to leave the group.'));
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // GREEK — billing owner schedules the subscription to end at the period
+  // boundary. Stripe is flipped to cancel_at_period_end=true; members keep
+  // full access until the workspace naturally hits expires_at.
+  const ownerDeleteGreekSubscription = async (groupId: string) => {
+    if (!groupId) return;
+    Alert.alert(
+      'Delete this subscription?',
+      "Your Greek subscription will stop auto-renewing. You and your members keep full access until the end of the term you've already paid for, and Stripe won't charge you again after that. This can't be undone from the app — contact billing if you change your mind.",
+      [
+        { text: 'Keep subscription', style: 'cancel' },
+        {
+          text: 'Delete subscription',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const response = await post({
+                apiName: 'apiNightline',
+                path: '/delete-membership',
+                options: { body: { userId: user.userId, groupId, mode: 'owner_delete' } },
+              });
+              const { body } = await response.response;
+              const result = (await body.json()) as unknown as DeleteMembershipFlowResponse;
+              if (result.success === false) {
+                Alert.alert('Could not delete', result.error || 'Please try again.');
+                return;
+              }
+              await new Promise(r => setTimeout(r, 800));
+              await fetchMembershipTokens();
+              const endDate = result.expiresAt
+                ? new Date(result.expiresAt).toLocaleDateString()
+                : null;
+              Alert.alert(
+                'Subscription scheduled to end',
+                endDate
+                  ? `You and your members keep access through ${endDate}. Stripe won't charge you again.`
+                  : "You and your members keep access through the end of the current term. Stripe won't charge you again."
+              );
+            } catch (error) {
+              Alert.alert(
+                'Could not delete',
+                parseAmplifyError(error, 'Failed to schedule cancellation. Stripe may be unreachable — try again in a minute.')
+              );
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const deleteMembership = async (groupId: string) => {
     if (!groupId) return;
+    // Greek plans use the dedicated leave / owner-delete flows above.
+    // Anything reaching this function is non-Greek (Individual / Group /
+    // Night / Bus) and takes the immediate-cancel path.
+    if (isGreekPass(groupId)) {
+      handleGreekCancelRequest();
+      return;
+    }
     Alert.alert(
       'Delete Subscription',
       'Are you sure you want to delete this subscription? This action cannot be undone.',
@@ -348,6 +501,130 @@ export default function ProfileScreen() {
       case 'gro': return 'Group Pass';
       default: return 'Unknown Pass';
     }
+  };
+
+  // Greek subscriptions are fixed-term and non-cancellable from the app.
+  // Anywhere the UI would offer cancel we instead point the user at
+  // billing@nightlinecomo.com.
+  const isGreekPass = (groupId: string) => (groupId || '').toLowerCase().startsWith('greek');
+
+  // --- TRANSFER OWNERSHIP HELPERS (TEMPORARILY DISABLED) --------------------
+  // These helpers back the Transfer Ownership modal, which has been commented
+  // out below. Keep them in sync if you re-enable the flow.
+  //
+  // // Exact warning copy the user must see + agree to BEFORE the transfer
+  // // lambda will proceed. We send this string to the backend, which logs it
+  // // verbatim on TRANSFER_LOG so the audit trail shows what was agreed to.
+  // const PATH_A_WARNING =
+  //   "Path A — I will keep paying. The new admin gets the ability to DELETE this workspace. My subscription continues through its current expiry date regardless. If the new admin deletes the workspace, I do NOT get a refund for the unused time.";
+  // const PATH_B_WARNING =
+  //   "Path B — New owner takes over future billing. Nothing moves mid-term; the current term stays paid by me. When the current term expires, the new owner is responsible for arranging the next year's subscription with billing@nightlinecomo.com.";
+  //
+  // const openTransferModal = (groupId: string) => {
+  //   setTransferModal({
+  //     visible: true,
+  //     groupId,
+  //     path: null,
+  //     newOwnerUsername: '',
+  //     newOwnerEmail: '',
+  //     accepted: false,
+  //     submitting: false,
+  //   });
+  // };
+  //
+  // const closeTransferModal = () => {
+  //   setTransferModal({
+  //     visible: false,
+  //     groupId: null,
+  //     path: null,
+  //     newOwnerUsername: '',
+  //     newOwnerEmail: '',
+  //     accepted: false,
+  //     submitting: false,
+  //   });
+  // };
+  //
+  // const submitTransfer = async () => {
+  //   const { groupId, path, newOwnerUsername, newOwnerEmail, accepted } = transferModal;
+  //   if (!groupId || !path) return;
+  //   if (!accepted) {
+  //     Alert.alert('Confirmation required', 'You must acknowledge the warning before transferring ownership.');
+  //     return;
+  //   }
+  //   if (path === 'A' && !newOwnerUsername.trim()) {
+  //     Alert.alert('Missing info', 'Enter the new owner\'s username (Path A requires them to already be a member).');
+  //     return;
+  //   }
+  //   if (path === 'B' && !newOwnerEmail.trim()) {
+  //     Alert.alert('Missing info', 'Enter the new owner\'s email address so we can send the invite.');
+  //     return;
+  //   }
+  //
+  //   setTransferModal(prev => ({ ...prev, submitting: true }));
+  //
+  //   try {
+  //     const response = await post({
+  //       apiName: 'apiNightline',
+  //       path: '/transfer-group-ownership',
+  //       options: {
+  //         body: {
+  //           path,
+  //           currentOwnerId: user.userId,
+  //           groupId,
+  //           warningAccepted: true,
+  //           warningTextShown: path === 'A' ? PATH_A_WARNING : PATH_B_WARNING,
+  //           newOwnerUsername: path === 'A' ? newOwnerUsername.trim() : undefined,
+  //           newOwnerEmail: path === 'B' ? newOwnerEmail.trim().toLowerCase() : undefined,
+  //         },
+  //       },
+  //     });
+  //     const { body } = await response.response;
+  //     const result = (await body.json()) as unknown as { success?: boolean; error?: string; message?: string };
+  //
+  //     if (result?.success === false) {
+  //       Alert.alert('Transfer failed', result.error || 'Could not complete the transfer.');
+  //       setTransferModal(prev => ({ ...prev, submitting: false }));
+  //       return;
+  //     }
+  //     closeTransferModal();
+  //     Alert.alert(
+  //       path === 'A' ? 'Admin rights transferred' : 'Invitation sent',
+  //       path === 'A'
+  //         ? 'Admin ownership has been transferred. You remain the billing owner until the subscription expires.'
+  //         : 'We emailed the new owner an invitation. The transfer completes once they accept. Nothing has changed yet.'
+  //     );
+  //     await fetchMembershipTokens();
+  //   } catch (error) {
+  //     let errorMessage = 'Unknown error';
+  //     if (typeof error === 'object' && error !== null) {
+  //       const err = error as any;
+  //       if (err._response?.body) {
+  //         try {
+  //           const bodyError = typeof err._response.body === 'string' ? JSON.parse(err._response.body) : err._response.body;
+  //           errorMessage = bodyError.error || bodyError.message || errorMessage;
+  //         } catch { errorMessage = err._response.body; }
+  //       } else if (err.message) { errorMessage = err.message; }
+  //     }
+  //     Alert.alert('Transfer failed', errorMessage);
+  //     setTransferModal(prev => ({ ...prev, submitting: false }));
+  //   }
+  // };
+  // --------------------------------------------------------------------------
+
+  // Shown in place of the cancel button for Greek passes — directs to billing
+  // rather than offering a self-serve action that the backend will reject anyway.
+  const handleGreekCancelRequest = () => {
+    Alert.alert(
+      'Greek subscriptions',
+      "Greek subscriptions can't be cancelled from the app. Your subscription runs through its expiry date. To make changes, email billing@nightlinecomo.com.",
+      [
+        { text: 'Close', style: 'cancel' },
+        {
+          text: 'Email billing',
+          onPress: () => Linking.openURL('mailto:billing@nightlinecomo.com?subject=Greek%20subscription%20question'),
+        },
+      ]
+    );
   };
 
   const renderInfoField = (
@@ -481,6 +758,217 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           )}
         </View>
+
+        {/* Subscriptions — one row per active pass. Greek passes get a
+            "Transfer Ownership" button + a "Cancel" button that routes to
+            billing instead of the API. Non-Greek passes keep the standard
+            cancel flow. */}
+        {passes.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Your Subscriptions</Text>
+            <Card style={styles.infoCard}>
+              {passes.map((pass, idx) => {
+                const greek = isGreekPass(pass.groupId);
+                const isOwner = pass.isOwner === true;
+                // Transfer UI is disabled for the initial release — leaving
+                // the computed flag here (as a const, unused) so re-enabling
+                // the button below is a one-line change.
+                // const showTransfer = greek && isOwner;
+                //
+                // Action button selection:
+                //   - Greek + owner  → "Delete subscription" (cancel_at_period_end)
+                //   - Greek + member → "Leave" (deactivates own row only)
+                //   - Non-Greek      → "Cancel" (immediate Stripe cancel)
+                let actionLabel: string;
+                let onActionPress: () => void;
+                if (greek && isOwner) {
+                  actionLabel = 'Delete subscription';
+                  onActionPress = () => ownerDeleteGreekSubscription(pass.groupId);
+                } else if (greek) {
+                  actionLabel = 'Leave';
+                  onActionPress = () => leaveGreekMembership(pass.groupId);
+                } else {
+                  actionLabel = 'Cancel';
+                  onActionPress = () => deleteMembership(pass.groupId);
+                }
+                return (
+                  <View key={pass.id}>
+                    <View style={styles.passRow}>
+                      <View style={styles.passInfo}>
+                        <Text style={styles.passType}>{getPassType(pass.groupId)}</Text>
+                        <Text style={styles.passGroupId} numberOfLines={1}>{pass.groupId}</Text>
+                      </View>
+                      <View style={styles.passActions}>
+                        {/* Transfer button — disabled until the transfer-ownership
+                            UI is re-enabled. Backend lambdas still exist.
+                        {showTransfer && (
+                          <TouchableOpacity
+                            style={styles.passActionButton}
+                            onPress={() => openTransferModal(pass.groupId)}
+                          >
+                            <UserCheck size={14} color={colors.primary} />
+                            <Text style={styles.passActionText}>Transfer</Text>
+                          </TouchableOpacity>
+                        )}
+                        */}
+                        <TouchableOpacity
+                          style={styles.passActionButton}
+                          onPress={onActionPress}
+                        >
+                          <Text style={[styles.passActionText, { color: colors.textSecondary }]}>
+                            {actionLabel}
+                          </Text>
+                        </TouchableOpacity>
+                        {greek && (
+                          <TouchableOpacity
+                            style={styles.passActionButton}
+                            onPress={handleGreekCancelRequest}
+                          >
+                            <Text style={[styles.passActionText, { color: colors.textMuted }]}>
+                              Contact billing
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </View>
+                    {idx < passes.length - 1 && <View style={styles.divider} />}
+                  </View>
+                );
+              })}
+            </Card>
+          </View>
+        )}
+
+        {/* TRANSFER OWNERSHIP MODAL — TEMPORARILY DISABLED.
+            Two paths, explicit warning + required acceptance checkbox. The
+            exact warning copy is also sent to the backend (logged verbatim on
+            TRANSFER_LOG for audit). To re-enable: uncomment the transferModal
+            state, the PATH_A/B warnings, open/close/submit helpers, the
+            Transfer button in the passes map, and remove the JSX comment
+            wrapper around this block.
+
+        <Modal
+          visible={transferModal.visible}
+          transparent
+          animationType="fade"
+          onRequestClose={closeTransferModal}
+        >
+          <View style={styles.modalContainer}>
+            <View style={[styles.modalView, { width: '92%' }]}>
+              <Text style={styles.modalTitle}>Transfer Ownership</Text>
+              <Text style={styles.modalSubtitle}>
+                Choose a transfer path. Each has different consequences for who pays.
+              </Text>
+
+              <View style={styles.pathPickerRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.pathOption,
+                    transferModal.path === 'A' && styles.pathOptionSelected,
+                  ]}
+                  onPress={() => setTransferModal(prev => ({ ...prev, path: 'A', accepted: false }))}
+                >
+                  <Text style={styles.pathOptionTitle}>A — I keep paying</Text>
+                  <Text style={styles.pathOptionBody}>
+                    New admin gets delete rights. I stay the billing owner
+                    through the current term. No refund if they delete it.
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.pathOption,
+                    transferModal.path === 'B' && styles.pathOptionSelected,
+                  ]}
+                  onPress={() => setTransferModal(prev => ({ ...prev, path: 'B', accepted: false }))}
+                >
+                  <Text style={styles.pathOptionTitle}>B — Hand off future billing</Text>
+                  <Text style={styles.pathOptionBody}>
+                    Nothing moves mid-term. When this term ends, the new owner
+                    arranges next year with billing@nightlinecomo.com.
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {transferModal.path === 'A' && (
+                <>
+                  <TextInput
+                    style={styles.modalInputPlain}
+                    placeholder="New owner's username (must be an existing member)"
+                    placeholderTextColor={colors.textMuted}
+                    value={transferModal.newOwnerUsername}
+                    onChangeText={(t) => setTransferModal(prev => ({ ...prev, newOwnerUsername: t }))}
+                    autoCapitalize="none"
+                    selectionColor={colors.primary}
+                  />
+                  <View style={styles.warningBox}>
+                    <AlertTriangle size={16} color="#b00" />
+                    <Text style={styles.warningText}>{PATH_A_WARNING}</Text>
+                  </View>
+                </>
+              )}
+
+              {transferModal.path === 'B' && (
+                <>
+                  <TextInput
+                    style={styles.modalInputPlain}
+                    placeholder="New owner's email"
+                    placeholderTextColor={colors.textMuted}
+                    value={transferModal.newOwnerEmail}
+                    onChangeText={(t) => setTransferModal(prev => ({ ...prev, newOwnerEmail: t }))}
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                    selectionColor={colors.primary}
+                  />
+                  <View style={styles.warningBox}>
+                    <AlertTriangle size={16} color="#b00" />
+                    <Text style={styles.warningText}>{PATH_B_WARNING}</Text>
+                  </View>
+                </>
+              )}
+
+              {transferModal.path && (
+                <TouchableOpacity
+                  style={styles.checkboxRow}
+                  onPress={() => setTransferModal(prev => ({ ...prev, accepted: !prev.accepted }))}
+                >
+                  <View style={[styles.checkbox, transferModal.accepted && styles.checkboxChecked]}>
+                    {transferModal.accepted && <Text style={styles.checkboxMark}>✓</Text>}
+                  </View>
+                  <Text style={styles.checkboxLabel}>
+                    I have read and agree to the above.
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              <View style={styles.modalButtonContainer}>
+                <TouchableOpacity onPress={closeTransferModal} disabled={transferModal.submitting}>
+                  <Text style={styles.modalButtonCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={submitTransfer}
+                  disabled={
+                    !transferModal.path ||
+                    !transferModal.accepted ||
+                    transferModal.submitting
+                  }
+                >
+                  <Text
+                    style={[
+                      styles.modalButtonConfirmText,
+                      (!transferModal.path || !transferModal.accepted || transferModal.submitting) && {
+                        opacity: 0.4,
+                      },
+                    ]}
+                  >
+                    {transferModal.submitting ? 'Working…' : 'Transfer'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        */}
 
         {/* Actions */}
         <Button
@@ -722,6 +1210,137 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 15,
     padding: 8,
+  },
+
+  // Subscription row
+  passRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  passInfo: {
+    flex: 1,
+  },
+  passType: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: 2,
+  },
+  passGroupId: {
+    fontSize: 11,
+    color: colors.textMuted,
+    fontFamily: 'monospace',
+  },
+  passActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  passActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    gap: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.surfaceBorder,
+  },
+  passActionText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.primary,
+  },
+
+  // Transfer modal — path picker + warning + checkbox
+  pathPickerRow: {
+    width: '100%',
+    gap: 10,
+    marginBottom: 16,
+  },
+  pathOption: {
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.surfaceBorder,
+    backgroundColor: colors.surface,
+  },
+  pathOptionSelected: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryGlow,
+  },
+  pathOptionTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 4,
+  },
+  pathOptionBody: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    lineHeight: 17,
+  },
+  modalInputPlain: {
+    height: 44,
+    width: '100%',
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    marginBottom: 12,
+    color: colors.text,
+    backgroundColor: colors.surface,
+    fontSize: 14,
+  },
+  warningBox: {
+    flexDirection: 'row',
+    gap: 10,
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: 'rgba(200,0,0,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(200,0,0,0.25)',
+    marginBottom: 12,
+  },
+  warningText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.text,
+  },
+  checkboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 16,
+    alignSelf: 'flex-start',
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: colors.textMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  checkboxMark: {
+    color: '#0A0A0F',
+    fontSize: 14,
+    fontWeight: '900',
+    lineHeight: 16,
+  },
+  checkboxLabel: {
+    flex: 1,
+    fontSize: 13,
+    color: colors.text,
   },
 
   // Unused legacy styles (kept to avoid any TS errors from refs in commented-out JSX)
