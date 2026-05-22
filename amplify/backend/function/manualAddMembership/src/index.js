@@ -148,7 +148,10 @@ exports.handler = async (event) => {
     lastName,
     phoneNumber,
     groupType = "greek",
-    maxUsers = "200",
+    // No blanket default here. The old code defaulted maxUsers to "200" for
+    // EVERY plan, which meant an Individual invite ended up with a 200-seat
+    // cap. The real cap is derived per-plan below (see effectiveMaxUsers).
+    maxUsers,
     stripeCustomerId: inputStripeCustomerId,
   } = parsedBody;
 
@@ -243,7 +246,33 @@ exports.handler = async (event) => {
   const newPlan = getPlanTier(groupId);
   const isNewGreek = newPlan.type === "greek";
 
-  console.log("🆕 Generated groupId:", groupId, "plan:", newPlan.type);
+  // Seat cap. The number the admin typed in (maxUsers) always wins — whatever
+  // they entered is used verbatim, for every plan. We only fall back to a
+  // plan-aware default when nothing valid was typed:
+  //   - individual → 1
+  //   - greek      → 200 (a chapter)
+  //   - group/other→ 1
+  // This replaces the old "200 for everyone" blanket default.
+  const parsedMax = parseInt(maxUsers, 10);
+  const hasTypedMax = Number.isFinite(parsedMax) && parsedMax > 0;
+  let effectiveMaxUsers;
+  if (hasTypedMax) {
+    effectiveMaxUsers = parsedMax;
+  } else if (newPlan.type === "greek") {
+    effectiveMaxUsers = 200;
+  } else {
+    // individual / group / other
+    effectiveMaxUsers = 1;
+  }
+
+  console.log(
+    "🆕 Generated groupId:",
+    groupId,
+    "plan:",
+    newPlan.type,
+    "maxUsers:",
+    effectiveMaxUsers
+  );
 
   try {
     // ── Step 3: Find existing active memberships ──────────────────────────
@@ -359,7 +388,7 @@ exports.handler = async (event) => {
       // Already exists — increment max_users rather than overwriting
       if (newPlan.type === "group" || newPlan.type === "greek") {
         const currentMax = parseInt(metadataCheck.Item.max_users || "0", 10);
-        const newMax = currentMax + parseInt(maxUsers, 10);
+        const newMax = currentMax + effectiveMaxUsers;
         await dynamo.send(
           new UpdateCommand({
             TableName: tableName,
@@ -398,7 +427,10 @@ exports.handler = async (event) => {
         update_at: createdAt,
         active: true,
         status: "active",
-        max_users: parseInt(maxUsers, 10),
+        max_users: effectiveMaxUsers,
+        // Owner occupies the first seat — kept in sync with the INVITE row's
+        // current_uses:1 below so leave/switch decrements stay symmetric.
+        current_uses: 1,
         plan_type: newPlan.type,
         stripe_customer_id: stripeCustomerId,
         owner_user_id: actualUserId,
@@ -483,7 +515,7 @@ exports.handler = async (event) => {
             used: false,
             invite_link: inviteLink,
             active: true,
-            max_uses: parseInt(maxUsers, 10),
+            max_uses: effectiveMaxUsers,
             current_uses: 1,
             email,
             first_name: firstName,
@@ -559,7 +591,7 @@ exports.handler = async (event) => {
         stripeCustomerId: stripeCustomerId || null,
         groupId,
         message: inviteLink
-          ? `Membership created with invite link for ${maxUsers} user(s)`
+          ? `Membership created with invite link for ${effectiveMaxUsers} user(s)`
           : "Membership created successfully",
         planType: newPlan.type,
         username,

@@ -21,6 +21,92 @@ const crypto = require("crypto");
 const client = new DynamoDBClient({});
 const dynamo = DynamoDBDocumentClient.from(client);
 
+// Give one seat back to a group's counters when a member switches OUT of it
+// (i.e. leaves the old Greek group to join a new one). This is the inverse of
+// the join increment below, keeping the old group's "X of Y seats used"
+// accurate after a switch.
+//
+//   - INVITE#<code>.current_uses → -1 (floored at 0); reopens the invite
+//     (used=false) if it drops back below max_uses.
+//   - METADATA.current_uses      → -1 (floored at 0).
+//
+// Floored everywhere so a double-fire can never push a counter negative.
+async function releaseSeat(tableName, groupId, now) {
+  // 1. INVITE row
+  try {
+    const resp = await dynamo.send(
+      new QueryCommand({
+        TableName: tableName,
+        KeyConditionExpression:
+          "group_id = :gid AND begins_with(group_data_members, :prefix)",
+        FilterExpression: "active = :true",
+        ExpressionAttributeValues: {
+          ":gid": groupId,
+          ":prefix": "INVITE#",
+          ":true": true,
+        },
+      })
+    );
+    const invites = resp.Items || [];
+    const target =
+      invites.find((inv) => Number(inv.current_uses || 0) > 0) || invites[0];
+    if (target) {
+      const curr = Number(target.current_uses || 0);
+      const max = Number(target.max_uses || 0);
+      const next = Math.max(0, curr - 1);
+      const reopen = max > 0 && next < max;
+      await dynamo.send(
+        new UpdateCommand({
+          TableName: tableName,
+          Key: {
+            group_id: target.group_id,
+            group_data_members: target.group_data_members,
+          },
+          UpdateExpression:
+            "SET current_uses = :next, used = :used, update_at = :now",
+          ExpressionAttributeValues: {
+            ":next": next,
+            ":used": reopen ? false : target.used === true,
+            ":now": now,
+          },
+        })
+      );
+      console.log(
+        `↩️ [ACCEPT_INVITE] INVITE ${target.group_data_members} current_uses ${curr} → ${next}${
+          reopen ? " (reopened)" : ""
+        }`
+      );
+    }
+  } catch (e) {
+    console.warn("⚠️ [ACCEPT_INVITE] releaseSeat INVITE update failed:", e.message);
+  }
+
+  // 2. METADATA.current_uses
+  try {
+    const meta = await dynamo.send(
+      new GetCommand({
+        TableName: tableName,
+        Key: { group_id: groupId, group_data_members: "METADATA" },
+      })
+    );
+    const curr = Number(meta.Item?.current_uses || 0);
+    const next = Math.max(0, curr - 1);
+    await dynamo.send(
+      new UpdateCommand({
+        TableName: tableName,
+        Key: { group_id: groupId, group_data_members: "METADATA" },
+        UpdateExpression: "SET current_uses = :next, update_at = :now",
+        ExpressionAttributeValues: { ":next": next, ":now": now },
+      })
+    );
+    console.log(
+      `↩️ [ACCEPT_INVITE] METADATA current_uses ${curr} → ${next} for ${groupId}`
+    );
+  } catch (e) {
+    console.warn("⚠️ [ACCEPT_INVITE] releaseSeat METADATA update failed:", e.message);
+  }
+}
+
 exports.handler = async (event) => {
   console.log("📥 [ACCEPT_INVITE] raw event:", JSON.stringify(event, null, 2));
 
@@ -363,6 +449,10 @@ exports.handler = async (event) => {
               })
             );
           }
+
+          // Hand the seat back to the old group's counters now that this
+          // user has switched out of it.
+          await releaseSeat(tableName, existingGid, now);
 
           console.log(
             `✅ [ACCEPT_INVITE] Deactivated member + ${

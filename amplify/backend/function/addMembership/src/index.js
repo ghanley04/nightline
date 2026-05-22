@@ -287,7 +287,11 @@ exports.handler = async (event) => {
     };
   }
 
-  let maxUsers = '1';
+  // Plan-aware seat-cap fallback. Greek is a chapter plan, so when the Stripe
+  // price has no max_members set we fall back to 200 (not 1, which would cap a
+  // whole chapter at a single seat). Individual/Group fall back to 1.
+  const greekFallbackMax = groupId.toLowerCase().startsWith('greek') ? '200' : '1';
+  let maxUsers = greekFallbackMax;
   try {
     const fullSession = await stripe.checkout.sessions.retrieve(session.id, {
       expand: ['line_items'],
@@ -296,11 +300,14 @@ exports.handler = async (event) => {
     const priceId = fullSession.line_items?.data?.[0]?.price?.id;
     if (priceId) {
       const price = await stripe.prices.retrieve(priceId);
-      maxUsers = price.metadata?.max_members || '1';
+      maxUsers = price.metadata?.max_members || greekFallbackMax;
       console.log(`🔸 max_members from price ${priceId}:`, maxUsers);
     }
   } catch (err) {
-    console.error('⚠️ Could not fetch line_items — defaulting max_users to 1:', err.message);
+    console.error(
+      `⚠️ Could not fetch line_items — defaulting max_users to ${greekFallbackMax}:`,
+      err.message
+    );
   }
 
   const groupIdLower = groupId.toLowerCase();
@@ -455,6 +462,10 @@ exports.handler = async (event) => {
       active: { BOOL: true },
       status: { S: 'active' },
       max_users: { S: isOneTimePass ? '1' : maxUsers },
+      // Owner occupies the first seat. acceptInvite increments this on each
+      // join and deleteMembership/acceptInvite decrement it on leave/switch,
+      // so it stays an accurate "seats used (incl. owner)" count.
+      current_uses: { N: '1' },
       plan_type: { S: planType },
       stripe_customer_id: { S: finalCustomerId },
       owner_user_id: { S: userId },
@@ -522,7 +533,13 @@ exports.handler = async (event) => {
             invite_link: { S: inviteLink },
             active: { BOOL: true },
             stripe_customer_id: { S: finalCustomerId },
-            current_uses: { N: '0' },
+            // Owner occupies the first seat (matches manualAddMembership).
+            current_uses: { N: '1' },
+            // Carry the plan-aware cap so acceptInvite's
+            // "current_uses < max_uses" guard actually enforces a limit.
+            // Without this the invite had no max_uses and allowed unlimited
+            // joins regardless of the plan.
+            max_uses: { N: String(parseInt(maxUsers, 10) || (isGreekPlan ? 200 : 1)) },
           },
         })
       );

@@ -324,6 +324,95 @@ async function deactivateGroupInvites(groupId, now) {
   }
 }
 
+// Give one seat back to a group's counters when a member leaves / switches
+// out / cancels. This is the mirror image of the increment acceptInvite does
+// on join, so the displayed "X of Y seats used" stays accurate.
+//
+//   - INVITE#<code>.current_uses → decremented by 1 (floored at 0). If the
+//     invite had been marked used=true because it filled up, dropping back
+//     below max_uses reopens it (used=false) so the freed seat is claimable.
+//   - METADATA.current_uses      → decremented by 1 (floored at 0).
+//
+// Only ONE invite seat is released per call — a single member leaving frees
+// exactly one seat. We floor at 0 everywhere so concurrent/duplicate calls
+// can never drive a counter negative.
+//
+// IMPORTANT: do NOT call this from the owner_delete path. There, members keep
+// their seats through the term the owner already paid for, so the counts must
+// stay put until the natural expires_at lifecycle tears the group down.
+async function releaseSeat(groupId, now) {
+  // 1. INVITE row
+  try {
+    const resp = await dynamo.send(
+      new QueryCommand({
+        TableName: MEMBERS_TABLE,
+        KeyConditionExpression:
+          "group_id = :gid AND begins_with(group_data_members, :prefix)",
+        FilterExpression: "active = :true",
+        ExpressionAttributeValues: {
+          ":gid": groupId,
+          ":prefix": "INVITE#",
+          ":true": true,
+        },
+      })
+    );
+    const invites = resp.Items || [];
+    // Prefer an invite that actually has a seat to give back.
+    const target =
+      invites.find((inv) => Number(inv.current_uses || 0) > 0) || invites[0];
+    if (target) {
+      const curr = Number(target.current_uses || 0);
+      const max = Number(target.max_uses || 0);
+      const next = Math.max(0, curr - 1);
+      // Reopen the invite if a seat opened back up under the cap.
+      const reopen = max > 0 && next < max;
+      await dynamo.send(
+        new UpdateCommand({
+          TableName: MEMBERS_TABLE,
+          Key: {
+            group_id: target.group_id,
+            group_data_members: target.group_data_members,
+          },
+          UpdateExpression:
+            "SET current_uses = :next, used = :used, update_at = :now",
+          ExpressionAttributeValues: {
+            ":next": next,
+            ":used": reopen ? false : target.used === true,
+            ":now": now,
+          },
+        })
+      );
+      console.log(
+        `↩️ INVITE ${target.group_data_members} current_uses ${curr} → ${next}${
+          reopen ? " (reopened)" : ""
+        }`
+      );
+    } else {
+      console.log(`ℹ️ No active INVITE to release a seat on for ${groupId}`);
+    }
+  } catch (e) {
+    console.warn("⚠️ releaseSeat INVITE update failed:", e.message);
+  }
+
+  // 2. METADATA.current_uses
+  try {
+    const meta = await getMetadata(groupId);
+    const curr = Number(meta?.current_uses || 0);
+    const next = Math.max(0, curr - 1);
+    await dynamo.send(
+      new UpdateCommand({
+        TableName: MEMBERS_TABLE,
+        Key: { group_id: groupId, group_data_members: "METADATA" },
+        UpdateExpression: "SET current_uses = :next, update_at = :now",
+        ExpressionAttributeValues: { ":next": next, ":now": now },
+      })
+    );
+    console.log(`↩️ METADATA current_uses ${curr} → ${next} for ${groupId}`);
+  } catch (e) {
+    console.warn("⚠️ releaseSeat METADATA update failed:", e.message);
+  }
+}
+
 exports.handler = async (event) => {
   console.log("📥 delete-membership event:", JSON.stringify(event, null, 2));
 
@@ -383,6 +472,8 @@ exports.handler = async (event) => {
           });
         }
         await deactivateMemberAndTokens(groupId, userId, now);
+        // Hand the seat back so the group's counts reflect the departure.
+        await releaseSeat(groupId, now);
         console.log(
           `🚪 User ${userId} left Greek group ${groupId} (no Stripe action)`
         );
@@ -554,6 +645,11 @@ exports.handler = async (event) => {
     } catch (err) {
       console.warn("⚠️ Could not update METADATA record:", err.message);
     }
+
+    // 3.5️⃣ Give the seat back on the counters too (mirrors acceptInvite's
+    // join increment). Floored at 0, so even though we just deactivated the
+    // group this can't drive counts negative.
+    await releaseSeat(groupId, now);
 
     // 4️⃣ Cancel Stripe LAST — DB is already clean. Only target the ONE
     // subscription that belongs to this membership. If we can't identify
