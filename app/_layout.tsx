@@ -301,12 +301,57 @@ function LayoutContent() {
 
 // ─── Phone Formatter ─────────────────────────────────────────────────────────
 
+/**
+ * Normalize whatever the user typed into a Cognito-compatible E.164 string.
+ *
+ * The user should not have to format the phone number themselves. We accept
+ * anything that yields 10 US digits (with or without country code, parens,
+ * dashes, dots, spaces, or a leading +) and return "+1XXXXXXXXXX".
+ *
+ * Examples — all return "+15555555555":
+ *   "(555) 555-5555"
+ *   "555-555-5555"
+ *   "5555555555"
+ *   "1 (555) 555-5555"
+ *   "+1 555.555.5555"
+ *
+ * For numbers that were typed with a leading + and look like a legitimate
+ * international E.164 (11–15 digits after stripping), we preserve them as-is
+ * so non-US users aren't blocked.
+ *
+ * Throws a *friendly* error message (used both by validateCustomSignUp for
+ * inline form errors and by handleSignUp as a defensive guard). Critically,
+ * the message includes the actual digit count so the user knows whether they
+ * typed too few or too many — replacing the old generic "must be 10 digits"
+ * and "too many characters" errors.
+ */
 export function formatPhoneToE164(phone: string): string {
-  if (!phone) throw new Error('Phone number is required');
-  const digits = phone.replace(/\D/g, '');
+  const trimmed = (phone || '').trim();
+  if (!trimmed) {
+    throw new Error('Please enter your phone number.');
+  }
+  const hasPlus = trimmed.startsWith('+');
+  const digits = trimmed.replace(/\D/g, '');
+
+  if (!digits) {
+    throw new Error('Please enter a 10-digit US phone number, e.g. (555) 555-5555.');
+  }
+
+  // 10 digits → assume US, prepend +1.
   if (digits.length === 10) return `+1${digits}`;
+  // 11 digits starting with 1 → US with country code already included.
   if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
-  throw new Error('Phone number must be 10 digits (US)');
+  // International number typed with an explicit + (11–15 digits is the E.164 range).
+  if (hasPlus && digits.length >= 11 && digits.length <= 15) return `+${digits}`;
+
+  if (digits.length < 10) {
+    throw new Error(
+      `Phone number needs at least 10 digits — you entered ${digits.length}.`
+    );
+  }
+  throw new Error(
+    `Phone number is too long — you entered ${digits.length} digits. Please enter a 10-digit US number, e.g. (555) 555-5555.`
+  );
 }
 
 // ─── Root Layout ─────────────────────────────────────────────────────────────
@@ -375,22 +420,23 @@ export default function RootLayout() {
       >
         {/*
           Keyboard handling:
-          - iOS uses behavior="padding" — when the keyboard appears we add
-            bottom padding to the wrapper so the form smoothly scrolls up.
-          - Android uses behavior={undefined} (i.e. no JS-driven avoidance).
-            Expo defaults to android:windowSoftInputMode="adjustResize", so
-            the window itself shrinks when the keyboard opens and the
-            Authenticator's internal KeyboardAwareScrollView handles the
-            rest. The previous behavior="height" + offset=24 caused the
-            outer view AND the system to BOTH resize, producing the
-            visible jump on focus.
-          - keyboardVerticalOffset=0 on both platforms because the
-            LinearGradient is the root view (no header or status-bar
-            container to compensate for).
+          - We use behavior={undefined} on BOTH platforms now. Amplify's
+            <Authenticator> already wraps its forms in a
+            KeyboardAwareScrollView that scrolls the focused field above
+            the keyboard. Adding our own behavior="padding" on top of it
+            caused two avoiders to react to the same keyboard event —
+            most visibly the "jump" on first focus of the sign-in
+            Username field (plain text input → iOS shows the QuickType
+            suggestions bar → keyboard frame is ~44pt taller than the
+            password's secure-entry keyboard, so the padding delta was
+            big enough to be perceptible as it raced Amplify's internal
+            scroll).
+          - keyboardVerticalOffset=0 because LinearGradient is the root
+            view (no header/status-bar container to compensate for).
         */}
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior={undefined}
           keyboardVerticalOffset={0}
         >
           <AppLinkHandler />
@@ -407,7 +453,24 @@ export default function RootLayout() {
                       { name: 'email', label: 'Email Address', type: 'email', placeholder: 'Enter your email address', required: true },
                       { name: 'given_name', label: 'First Name', type: 'default', placeholder: 'Enter your First Name', required: true },
                       { name: 'family_name', label: 'Last Name', type: 'default', placeholder: 'Enter your Last Name', required: true },
-                      { name: 'phone_number', label: 'Phone Number', type: 'default', placeholder: '+1 XXXXXXXXXX', required: true },
+                      // Placeholder shows a familiar US format. The formatter
+                      // (formatPhoneToE164) accepts pretty much anything that
+                      // yields 10 US digits — parens, dashes, dots, spaces,
+                      // leading +1 are all fine — so the user does NOT have
+                      // to type "+1 XXXXXXXXXX" exactly the way the old
+                      // placeholder implied. We also use keyboardType=phone-pad
+                      // and autoComplete=tel so iOS/Android offer the right
+                      // keyboard and contact autofill.
+                      {
+                        name: 'phone_number',
+                        label: 'Phone Number',
+                        type: 'default',
+                        placeholder: '(555) 555-5555',
+                        required: true,
+                        keyboardType: 'phone-pad',
+                        autoComplete: 'tel',
+                        textContentType: 'telephoneNumber',
+                      },
                       { name: 'password', label: 'Password', type: 'password', placeholder: 'Enter a password', required: true },
                       { name: 'confirm_password', label: 'Confirm Password', type: 'password', placeholder: 'Confirm your password', required: true },
                     ]}
@@ -434,9 +497,25 @@ export default function RootLayout() {
                   console.log('[SignUp] Raw formData:', JSON.stringify({ username, options }));
 
                   try {
+                    // Defensive re-format. validateCustomSignUp normally
+                    // catches bad phone formats and surfaces them as inline
+                    // field errors, so by the time we get here the value
+                    // should already be parseable. We still wrap the call so
+                    // that if anything slips through, the user sees our
+                    // friendly message ("you entered N digits…") as a toast
+                    // instead of Cognito's opaque InvalidParameterException.
                     if (userAttributes.phone_number) {
                       console.log('[SignUp] Raw phone:', userAttributes.phone_number);
-                      userAttributes.phone_number = formatPhoneToE164(userAttributes.phone_number);
+                      try {
+                        userAttributes.phone_number = formatPhoneToE164(
+                          userAttributes.phone_number
+                        );
+                      } catch (phoneErr: any) {
+                        showToastRef.current?.(phoneErr.message, 'error');
+                        // Re-throw so the Authenticator keeps the user on the
+                        // sign-up form instead of advancing to confirmation.
+                        throw phoneErr;
+                      }
                       console.log('[SignUp] Formatted phone:', userAttributes.phone_number);
                     }
 
@@ -454,14 +533,35 @@ export default function RootLayout() {
                     console.log('[SignUp] userId:', result.userId);
                     console.log('[SignUp] nextStep:', JSON.stringify(result.nextStep));
 
-                    // ✅ Notify the user that their account was created and they need to verify
-                    showToastRef.current?.(
-                      '✅ Account created! Check your email for a verification code.',
-                      'success'
-                    );
+                    // Two possible Cognito outcomes here, and the Authenticator
+                    // only auto-routes for one of them:
+                    //
+                    //   1. nextStep === 'CONFIRM_SIGN_UP' — verification email
+                    //      went out. The Authenticator's state machine moves
+                    //      to its ConfirmSignUp screen on its own; we just
+                    //      tell the user to check their inbox.
+                    //
+                    //   2. nextStep === 'DONE' (isSignUpComplete === true) —
+                    //      verification was skipped (auto-confirmed user pool
+                    //      or admin-confirmed). The Authenticator has no
+                    //      built-in transition for this case and otherwise
+                    //      leaves the user staring at the blank SignUp form.
+                    //      We explicitly route them to SignIn and tell them
+                    //      to log in.
+                    const nextStep = result.nextStep?.signUpStep;
+                    if (result.isSignUpComplete || nextStep === 'DONE') {
+                      showToastRef.current?.(
+                        '✅ Account created! Please sign in.',
+                        'success'
+                      );
+                      toSignInRef.current?.();
+                    } else {
+                      showToastRef.current?.(
+                        '✅ Account created! Check your email for a verification code.',
+                        'success'
+                      );
+                    }
 
-                    // Cognito will automatically move to the confirmSignUp screen.
-                    // After the user enters the code it will redirect to sign-in itself.
                     return result;
                   } catch (err: any) {
                     console.log('[SignUp] ❌ ERROR');
@@ -550,11 +650,19 @@ export default function RootLayout() {
 
                   console.log('[ConfirmSignUp] ✅ SUCCESS');
 
-                  // ✅ This fires immediately after successful verification
                   showToastRef.current?.(
                     '🎉 Email verified! You can now sign in.',
                     'success'
                   );
+
+                  // Explicitly route to SignIn. Without this call the
+                  // Authenticator's state machine sometimes leaves the user on
+                  // a now-empty ConfirmSignUp/SignUp screen after the DONE
+                  // step, especially when a custom SignUp component is
+                  // registered. We have toSignInRef already wired up for the
+                  // UsernameExistsException path — reusing it here closes the
+                  // "successful sign-up dumps me on a blank form" hole.
+                  toSignInRef.current?.();
 
                   return result;
                 },

@@ -40,15 +40,22 @@ export default function TabLayout() {
             backgroundColor: colors.surface,
             borderTopColor: colors.surfaceBorder,
             borderTopWidth: 1,
-            height: 70,
-            paddingBottom: 8,
+            // Compact bar with just enough vertical room for a slightly
+            // larger icon + a slightly larger label and a comfortable gap
+            // between them. paddingBottom is small but still clears the home
+            // indicator on edge-to-edge devices.
+            height: 72,
             paddingTop: 8,
+            paddingBottom: 14,
             paddingHorizontal: 12,
           },
           tabBarLabelStyle: {
-            fontSize: 11,
+            // Bumped one point each; the marginTop is the real readability
+            // win — it stops the label from kissing the icon.
+            fontSize: 12,
             fontWeight: '600',
             letterSpacing: 0.3,
+            marginTop: 6,
           },
           headerStyle: { backgroundColor: colors.surface },
           headerTitleStyle: {
@@ -65,7 +72,7 @@ export default function TabLayout() {
           options={{
             title: 'Map',
             tabBarIcon: ({ color, size }) => (
-              <MapPin size={size} color={color} />
+              <MapPin size={26} color={color} />
             ),
           }}
         />
@@ -74,7 +81,7 @@ export default function TabLayout() {
           options={{
             title: 'My Pass',
             tabBarIcon: ({ color, size }) => (
-              <QrCode size={size} color={color} />
+              <QrCode size={26} color={color} />
             ),
           }}
         />
@@ -83,7 +90,7 @@ export default function TabLayout() {
           options={{
             title: 'Plans',
             tabBarIcon: ({ color, size }) => (
-              <Bus size={size} color={color} />
+              <Bus size={26} color={color} />
             ),
           }}
         />
@@ -92,7 +99,7 @@ export default function TabLayout() {
           options={{
             title: 'Profile',
             tabBarIcon: ({ color, size }) => (
-              <User size={size} color={color} />
+              <User size={26} color={color} />
             ),
           }}
         />

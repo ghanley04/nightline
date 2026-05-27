@@ -16,13 +16,18 @@ export default function TabLayout() {
             backgroundColor: colors.surface,
             borderTopColor: colors.surfaceBorder,
             borderTopWidth: 1,
-            height: 60,
-            paddingBottom: 8,
+            // Matches (tabs)/_layout.tsx — compact bar with breathing room
+            // between the (slightly larger) icon and label.
+            height: 72,
+            paddingTop: 8,
+            paddingBottom: 14,
+            paddingHorizontal: 12,
           },
           tabBarLabelStyle: {
-            fontSize: 11,
+            fontSize: 12,
             fontWeight: '600',
             letterSpacing: 0.3,
+            marginTop: 6,
           },
           headerStyle: { backgroundColor: colors.surface },
           headerTitleStyle: {
@@ -38,7 +43,7 @@ export default function TabLayout() {
           options={{
             title: 'Add Greek',
             tabBarIcon: ({ color, size }) => (
-              <UserPlus size={size} color={color} />
+              <UserPlus size={26} color={color} />
             ),
           }}
         />
@@ -47,7 +52,7 @@ export default function TabLayout() {
           options={{
             title: 'Data',
             tabBarIcon: ({ color, size }) => (
-              <User size={size} color={color} />
+              <User size={26} color={color} />
             ),
           }}
         />
@@ -56,7 +61,7 @@ export default function TabLayout() {
           options={{
             title: 'Profile',
             tabBarIcon: ({ color, size }) => (
-              <User size={size} color={color} />
+              <User size={26} color={color} />
             ),
           }}
         />
