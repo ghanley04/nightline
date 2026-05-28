@@ -444,6 +444,44 @@ export default function RootLayout() {
             <Authenticator
               initialState="signIn"
               components={{
+                // Custom SignIn override — visually identical to the default
+                // (and to SignUp) because we still render <Authenticator.SignIn>.
+                // The only thing we change is the `fields` array: we hand
+                // Amplify the same username + password pair it would use
+                // anyway, but with iOS-suppression props on the username
+                // input so that the QuickType predictive strip and the
+                // password-autofill suggestion don't show. Those are what
+                // were resizing the keyboard frame per keystroke and making
+                // the username box jump up and down during typing. The
+                // password field doesn't need these because secureTextEntry
+                // already suppresses all of them.
+                SignIn: ({ fields, ...props }) => (
+                  <Authenticator.SignIn
+                    {...props}
+                    fields={[
+                      {
+                        name: 'username',
+                        label: 'Username',
+                        placeholder: 'Enter your username',
+                        type: 'default',
+                        required: true,
+                        autoCapitalize: 'none',
+                        autoCorrect: false,
+                        spellCheck: false,
+                        autoComplete: 'off',
+                        textContentType: 'none',
+                      },
+                      {
+                        name: 'password',
+                        label: 'Password',
+                        placeholder: 'Enter your password',
+                        type: 'password',
+                        required: true,
+                        autoCapitalize: 'none',
+                      },
+                    ]}
+                  />
+                ),
                 SignUp: ({ fields, toSignIn, ...props }) => (
                   <Authenticator.SignUp
                     {...props}
