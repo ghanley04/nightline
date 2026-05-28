@@ -5,7 +5,11 @@ const client = new DynamoDBClient({});
 const dynamo = DynamoDBDocumentClient.from(client);
 
 const TOKENS_TABLE = "Tokens";
-const GROUPS_TABLE = "GroupsData";
+// Was: "GroupsData". The actual table is "GroupData-dev" (no trailing 's',
+// '-dev' suffix). Every other lambda points at the right name; this one was
+// typo'd, which is why the username lookup below was silently failing and
+// every scan rendered as "Guest" in the bus driver app.
+const GROUPS_TABLE = "GroupData-dev";
 const USER_INDEX = "user_id-index";
 
 /**
@@ -45,19 +49,30 @@ exports.handler = async (event) => {
   }
 
   try {
-    // 1️⃣ Look up the token to get the user_id
+    // 1️⃣ Look up the token to get the user_id.
+    //
+    // The Tokens table has a COMPOSITE primary key: (token_id, user_id).
+    // The old code did a GetCommand with only { token_id: tokenId }, which
+    // DynamoDB rejects with ValidationException ("The provided key element
+    // does not match the schema") because a Get requires the full primary
+    // key. That exception was being caught by the outer try/catch and turned
+    // into `{ valid: false, error: 'Failed to validate token' }`, so every
+    // single scan rendered as a red X in the bus-driver app — regardless of
+    // plan type. We don't have the user_id at this point (the QR carries only
+    // token_id), so we switch to a QueryCommand, which is allowed to use the
+    // partition key alone.
     console.log('🔍 [VALIDATE_TOKEN] Looking up token:', tokenId);
-    
+
     const tokenResult = await dynamo.send(
-      new GetCommand({
+      new QueryCommand({
         TableName: TOKENS_TABLE,
-        Key: {
-          token_id: tokenId,
-        },
+        KeyConditionExpression: "token_id = :tid",
+        ExpressionAttributeValues: { ":tid": tokenId },
+        Limit: 1,
       })
     );
 
-    const token = tokenResult.Item;
+    const token = tokenResult.Items?.[0];
 
     if (!token) {
       console.log('❌ [VALIDATE_TOKEN] Token not found');
@@ -153,23 +168,39 @@ exports.handler = async (event) => {
       }
     }
 
-    // 6️⃣ Get user information from the membership record
+    // 6️⃣ Get user information from the membership record.
+    //
+    // The GroupData-dev table is keyed by (group_id, group_data_members) with
+    // values like "MEMBER#USER#<userId>" — not the "PK/SK" + "GROUP#" prefix
+    // shape the old code was using. The old shape silently missed every
+    // lookup, so userName always fell back to "Guest" even when validation
+    // succeeded. Also note: the field stored on the row is `username` (and
+    // first_name/last_name from manualAddMembership), not the camelCase
+    // `userName` the old code read.
     const groupId = scannedTokenGroupId;
     let userName = 'Guest';
-    
+
     try {
       const memberResult = await dynamo.send(
         new GetCommand({
           TableName: GROUPS_TABLE,
           Key: {
-            PK: `GROUP#${groupId}`,
-            SK: `MEMBER#USER#${userId}`,
+            group_id: groupId,
+            group_data_members: `MEMBER#USER#${userId}`,
           },
         })
       );
 
       if (memberResult.Item) {
-        userName = memberResult.Item.userName || 'Guest';
+        const fullName = [memberResult.Item.first_name, memberResult.Item.last_name]
+          .filter(Boolean)
+          .join(' ')
+          .trim();
+        userName =
+          memberResult.Item.username ||
+          fullName ||
+          memberResult.Item.email ||
+          'Guest';
       }
     } catch (err) {
       console.warn('⚠️ [VALIDATE_TOKEN] Could not fetch user name:', err);
