@@ -279,12 +279,12 @@ function LayoutContent() {
   useEffect(() => {
     if (isReady && !loading && !showTerms) {
       console.log('[Router] Routing — isAdmin:', isAdmin, '| isBusDriver:', isBusDriver);
-      if (isAdmin) {
-        router.replace('/(adminTabs)');
+      if (!isAdmin && !isBusDriver) {
+        router.replace('/(tabs)');
       } else if (isBusDriver) {
         router.replace('/(busTabs)');
-      } else {
-        router.replace('/(tabs)');
+      } else if (isAdmin){
+        router.replace('/(adminTabs)');
       }
     }
   }, [isReady, loading, isAdmin, isBusDriver, showTerms, authStatus]);
